@@ -133,7 +133,7 @@ export default function DetallePacientePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs sm:text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs sm:text-sm">
             <div>
               <span className="block text-slate-400 font-semibold">Edad</span>
               <span className="font-bold text-slate-700">{paciente.edad ? `${paciente.edad} años` : 'N/A'}</span>
@@ -145,10 +145,6 @@ export default function DetallePacientePage() {
             <div>
               <span className="block text-slate-400 font-semibold">Correo Electrónico</span>
               <span className="font-bold text-slate-700 truncate block">{paciente.email || 'N/A'}</span>
-            </div>
-            <div>
-              <span className="block text-slate-400 font-semibold">Ocupación / Notas</span>
-              <span className="font-bold text-slate-700">{paciente.ocupacion || 'N/A'}</span>
             </div>
           </div>
         </div>

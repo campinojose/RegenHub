@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { generarPDFConsulta } from '@/lib/generarPDF'
 
 interface MedicamentoItem {
   nombre: string
@@ -20,6 +21,7 @@ function NuevaConsultaContent() {
   const [listaDoctores, setListaDoctores] = useState<any[]>([])
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('')
   const [paciente, setPaciente] = useState<any>(null)
+  const [perfilAsistente, setPerfilAsistente] = useState<any>(null)
   
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(true)
@@ -50,20 +52,32 @@ function NuevaConsultaContent() {
           return
         }
 
+        // Obtener perfil del asistente logueado
+        const { data: perfil } = await supabase
+          .from('perfiles_usuario')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+        if (perfil) setPerfilAsistente({ ...perfil, id: user.id })
+
         // 1. Cargar todos los doctores disponibles
         const { data: docs, error: errDocs } = await supabase
           .from('doctores')
           .select('*')
           .order('nombre_completo', { ascending: true })
 
-        if (errDocs) console.error('Error al cargar doctores:', errDocs)
+        if (errDocs) {
+          console.error('Error al cargar doctores:', errDocs)
+          alert('Error al cargar doctores: ' + errDocs.message)
+        }
 
         if (docs && docs.length > 0) {
           setListaDoctores(docs)
           
-          // Buscar si el usuario actual coincide con alguno por ID o email
+          // Pre-seleccionar doctor favorito si existe
+          const doctorFavorito = perfil?.id_doctor_favorito
           const docCoincidente = docs.find(
-            d => d.id === user.id || d.email === user.email
+            d => d.id === user.id || d.email === user.email || d.id === doctorFavorito
           )
 
           if (docCoincidente) {
@@ -202,9 +216,15 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
         precio: Number(m.precio) || 0
       }))
 
+    const totalMeds = medicamentosValidos.reduce((acc, m) => acc + m.precio, 0)
+    const totalFactura = (Number(valorConsulta) || 0) + totalMeds
+
+    const { data: { user } } = await supabase.auth.getUser()
+
     const objetoConsulta = {
       id_paciente: paciente.id,
       id_doctor: selectedDoctorId,
+      id_asistente: user?.id || null,
       motivo_consulta: motivoConsulta,
       peso_kg: pesoKg ? Number(pesoKg) : null,
       talla_cm: tallaCm ? Number(tallaCm) : null,
@@ -214,6 +234,8 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
       temperatura_c: temperatura ? Number(temperatura) : null,
       tratamiento_realizado: tratamiento || null,
       precio_consulta: Number(valorConsulta) || 0,
+      total_factura: totalFactura,
+      estado_pago: 'pendiente',
       medicamentos: medicamentosValidos
     }
 
@@ -223,6 +245,29 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
       console.error('Error Supabase:', error)
       alert('Error al guardar la consulta: ' + error.message)
     } else {
+      // Generar PDF automáticamente
+      const doctorActual = listaDoctores.find(d => d.id === selectedDoctorId)
+      generarPDFConsulta({
+        pacienteNombre: paciente.nombre_completo || 'N/A',
+        pacienteCC: paciente.documento_identidad || 'N/A',
+        pacienteEdad: paciente.edad,
+        pacienteSexo: paciente.sexo,
+        pacienteDireccion: paciente.direccion,
+        pacienteTelefono: paciente.telefono,
+        doctorNombre: doctorActual?.nombre_completo || 'N/A',
+        asistenteNombre: perfilAsistente?.nombre_completo || 'Asistente',
+        pesoKg: pesoKg || undefined,
+        tallaCm: tallaCm || undefined,
+        imc: imc ?? undefined,
+        presionArterial: presionArterial || undefined,
+        frecuenciaCardiaca: frecuenciaCardiaca || undefined,
+        temperatura: temperatura || undefined,
+        motivoConsulta,
+        diagnostico: tratamiento,
+        valorConsulta: Number(valorConsulta) || 0,
+        medicamentos: medicamentosValidos,
+        estadoPago: 'pendiente',
+      })
       setGuardadoExitoso(true)
     }
     setLoading(false)
@@ -242,10 +287,10 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
         
         {/* Botón Volver */}
         <button
-          onClick={() => router.push('/dashboard')}
+          onClick={() => router.push('/asistente')}
           className="mb-4 text-sm font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1"
         >
-          ← Volver al Dashboard
+          ← Volver al Panel
         </button>
 
         {!paciente && (
@@ -319,14 +364,14 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                   value={motivoConsulta}
                   onChange={(e) => setMotivoConsulta(e.target.value)}
                   placeholder="Motivo principal de la cita..."
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black"
                 />
               </div>
 
               {/* SIGNOS VITALES */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h2 className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-3">Signos Vitales</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Peso (kg)</label>
                     <input
@@ -335,7 +380,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                       placeholder="70"
                       value={pesoKg}
                       onChange={(e) => setPesoKg(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
                     />
                   </div>
                   <div>
@@ -345,7 +390,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                       placeholder="170"
                       value={tallaCm}
                       onChange={(e) => setTallaCm(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
                     />
                   </div>
                   <div>
@@ -355,28 +400,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                       placeholder="120/80"
                       value={presionArterial}
                       onChange={(e) => setPresionArterial(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">F. Cardíaca</label>
-                    <input
-                      type="number"
-                      placeholder="72"
-                      value={frecuenciaCardiaca}
-                      onChange={(e) => setFrecuenciaCardiaca(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Temp (°C)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="36.5"
-                      value={temperatura}
-                      onChange={(e) => setTemperatura(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
                     />
                   </div>
                 </div>
@@ -384,13 +408,13 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
 
               {/* TRATAMIENTO / OBSERVACIONES */}
               <div>
-                <label className="block text-sm font-bold text-slate-800 mb-1">Tratamiento / Observaciones Médicas</label>
+                <label className="block text-sm font-bold text-slate-800 mb-1">Diagnóstico</label>
                 <textarea
                   rows={2}
                   value={tratamiento}
                   onChange={(e) => setTratamiento(e.target.value)}
-                  placeholder="Detalles del diagnóstico o procedimiento realizado..."
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  placeholder="Detalles del diagnóstico..."
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black"
                 />
               </div>
 
@@ -438,7 +462,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                             placeholder="Ej: Lithium Carbonicum"
                             value={med.nombre}
                             onChange={(e) => handleUpdateMedicamento(index, 'nombre', e.target.value)}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-black"
                           />
                         </div>
 
@@ -451,7 +475,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                             placeholder="30000"
                             value={med.precio}
                             onChange={(e) => handleUpdateMedicamento(index, 'precio', e.target.value)}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold bg-white"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold bg-white text-black"
                           />
                         </div>
                       </div>
@@ -465,7 +489,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                           placeholder="Ej: Tomar 2 gotas cada 8h"
                           value={med.indicacion}
                           onChange={(e) => handleUpdateMedicamento(index, 'indicacion', e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-black"
                         />
                       </div>
                     </div>
@@ -506,17 +530,14 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
 
               {/* ACCIONES POST-GUARDADO */}
               <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 bg-blue-50 border border-blue-200 text-blue-700 p-3 rounded-xl text-xs font-semibold text-center">
+                  📄 El PDF se descargó automáticamente a tu dispositivo
+                </div>
                 <button
-                  onClick={() => window.print()}
-                  className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition text-sm"
-                >
-                  🖨️ Imprimir Resumen
-                </button>
-                <button
-                  onClick={() => router.push('/dashboard')}
+                  onClick={() => router.push('/asistente')}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition text-sm"
                 >
-                  Regresar al Dashboard
+                  Regresar al Panel
                 </button>
               </div>
             </div>

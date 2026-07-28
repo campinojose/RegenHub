@@ -13,16 +13,25 @@ export default function DashboardPage() {
     const [busqueda, setBusqueda] = useState('')
     const [loading, setLoading] = useState(true)
 
+    // Obtener la fecha de hoy en formato YYYY-MM-DD local
+    const obtenerFechaHoy = () => {
+        const hoy = new Date()
+        const yyyy = hoy.getFullYear()
+        const mm = String(hoy.getMonth() + 1).padStart(2, '0')
+        const dd = String(hoy.getDate()).padStart(2, '0')
+        return `${yyyy}-${mm}-${dd}`
+    }
+
     // Estado del modal de registro de paciente con todos sus campos
     const [modalAbierto, setModalAbierto] = useState(false)
     const [nombre, setNombre] = useState('')
     const [documento, setDocumento] = useState('')
     const [fotoDocumento, setFotoDocumento] = useState<File | null>(null)
-    const [fechaNacimiento, setFechaNacimiento] = useState('')
+    const [created_at, setcreated_at] = useState(obtenerFechaHoy())
     const [edad, setEdad] = useState('')
     const [sexo, setSexo] = useState('Masculino')
     const [direccion, setDireccion] = useState('')
-    const [ciudad, setCiudad] = useState('')
+    const [barrio, setBarrio] = useState('')
     const [telefono, setTelefono] = useState('')
     const [email, setEmail] = useState('')
     const [guardandoPaciente, setGuardandoPaciente] = useState(false)
@@ -58,21 +67,6 @@ export default function DashboardPage() {
         }
     }
 
-    // Calcular edad automáticamente al seleccionar fecha de nacimiento
-    const handleFechaNacimientoChange = (fechaStr: string) => {
-        setFechaNacimiento(fechaStr)
-        if (fechaStr) {
-            const hoy = new Date()
-            const fechaNac = new Date(fechaStr)
-            let edadCalculada = hoy.getFullYear() - fechaNac.getFullYear()
-            const mes = hoy.getMonth() - fechaNac.getMonth()
-            if (mes < 0 || (mes === 0 && hoy.getDate() < fechaNac.getDate())) {
-                edadCalculada--
-            }
-            setEdad(edadCalculada.toString())
-        }
-    }
-
     const handleRegistrarPaciente = async (e: React.FormEvent) => {
         e.preventDefault()
         setGuardandoPaciente(true)
@@ -86,14 +80,14 @@ export default function DashboardPage() {
             const filePath = `pacientes/${fileName}`
 
             const { error: uploadError } = await supabase.storage
-                .from('documentos')
+                .from('cedulas-pacientes')
                 .upload(filePath, fotoDocumento)
 
             if (uploadError) {
                 console.error('Error al subir la imagen:', uploadError)
             } else {
                 const { data: publicUrlData } = supabase.storage
-                    .from('documentos')
+                    .from('cedulas-pacientes')
                     .getPublicUrl(filePath)
 
                 urlFoto = publicUrlData.publicUrl
@@ -105,15 +99,15 @@ export default function DashboardPage() {
             {
                 nombre_completo: nombre,
                 documento_identidad: documento || null,
-                foto_documento_url: urlFoto,
-                fecha_nacimiento: fechaNacimiento || null,
+                foto_cedula_frente: urlFoto,
+                created_at: created_at || null,
                 edad: edad ? parseInt(edad) : null,
-                genero: sexo, // O el nombre exacto de la columna en tu BD (genero/sexo)
                 sexo: sexo,
                 direccion: direccion || null,
-                ciudad: ciudad || null,
+                barrio: barrio || null,
                 telefono: telefono || null,
                 email: email || null,
+                correo: email || null,
             }
         ])
 
@@ -132,11 +126,11 @@ export default function DashboardPage() {
         setNombre('')
         setDocumento('')
         setFotoDocumento(null)
-        setFechaNacimiento('')
+        setcreated_at(obtenerFechaHoy())
         setEdad('')
         setSexo('Masculino')
         setDireccion('')
-        setCiudad('')
+        setBarrio('')
         setTelefono('')
         setEmail('')
     }
@@ -168,6 +162,12 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex gap-3">
+                    <button
+                        onClick={() => router.push('/recepcionista/ingresos')}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition"
+                    >
+                        📊 Ver Ingresos
+                    </button>
                     <button
                         onClick={() => setModalAbierto(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition"
@@ -285,18 +285,17 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            {/* FECHA NACIMIENTO, EDAD Y SEXO */}
+                            {/* FECHA PRIMERA CONSULTA, EDAD Y SEXO */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Fecha de Nacimiento</label>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Fecha de Primera Consulta</label>
                                     <input
                                         type="date"
-                                        value={fechaNacimiento}
-                                        onChange={(e) => handleFechaNacimientoChange(e.target.value)}
+                                        value={created_at}
+                                        onChange={(e) => setcreated_at(e.target.value)}
                                         className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
                                     />
                                 </div>
-
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1">Edad</label>
                                     <input
@@ -307,7 +306,6 @@ export default function DashboardPage() {
                                         className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
                                     />
                                 </div>
-
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1">Sexo / Género</label>
                                     <select
@@ -317,12 +315,11 @@ export default function DashboardPage() {
                                     >
                                         <option value="Masculino">Masculino</option>
                                         <option value="Femenino">Femenino</option>
-                                        <option value="Otro">Otro</option>
                                     </select>
                                 </div>
                             </div>
 
-                            {/* DIRECCIÓN Y CIUDAD */}
+                            {/* DIRECCIÓN Y Barrio */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1">Dirección de Residencia</label>
@@ -336,15 +333,17 @@ export default function DashboardPage() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Ciudad</label>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Barrio</label>
                                     <input
                                         type="text"
-                                        placeholder="Ej: Cali / Bogotá"
-                                        value={ciudad}
-                                        onChange={(e) => setCiudad(e.target.value)}
+                                        placeholder="Ej: Ciudad 2000 / Calipso"
+                                        value={barrio}
+                                        onChange={(e) => setBarrio(e.target.value)}
                                         className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
                                     />
                                 </div>
+
+                                
                             </div>
 
                             {/* TELÉFONO Y EMAIL */}
@@ -371,6 +370,21 @@ export default function DashboardPage() {
                                     />
                                 </div>
                             </div>
+
+                            {/* Profesional elegido */}
+                            <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Profeisonal Elegido</label>
+                                    <select
+                                        value={sexo}
+                                        onChange={(e) => setSexo(e.target.value)}
+                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                    >
+                                        <option value="Clemente">Clemente</option>
+                                        <option value="Rosa">Rosa</option>
+                                        <option value="Carolina">Carolina</option>
+                                        <option value="Andres">Andres</option>
+                                    </select>
+                                </div>
 
                             {/* BOTONES DE ACCIÓN */}
                             <div className="flex gap-2 pt-3 border-t border-slate-100">
