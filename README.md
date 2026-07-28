@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RegenHub
 
-## Getting Started
+Sistema de gestión clínica y administrativa para medicina regenerativa. Incluye pacientes, profesionales, consultas, facturación básica y generación de resúmenes PDF.
 
-First, run the development server:
+## Requisitos
+
+- Node.js 20 o superior.
+- Un proyecto de Supabase.
+
+## Puesta en marcha
+
+1. Configura `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` en `.env.local`.
+2. En el SQL Editor de Supabase ejecuta `supabase/migrations/202607270001_initial_schema.sql`.
+3. Crea los usuarios en Supabase Auth y sus perfiles en `perfiles_usuario`. El primer administrador debe crearse desde el SQL Editor, porque las políticas no permiten autoasignarse privilegios.
+4. Instala dependencias y arranca el proyecto:
 
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Roles
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `administrador`: gestiona profesionales y perfiles.
+- `recepcionista`: registra pacientes y actualiza cobros.
+- `asistente`: registra consultas de su médico favorito y consulta sus ingresos.
+- `doctor`: consulta información clínica.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Las cédulas se guardan en el bucket privado `cedulas-pacientes`. No conviertas ese bucket en público: para mostrar archivos, crea URLs firmadas desde una ruta protegida.
 
-## Learn More
+## Validación
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```

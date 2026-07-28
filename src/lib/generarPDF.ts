@@ -32,6 +32,12 @@ interface DatosPDF {
   estadoPago: string
 }
 
+type DocumentoConTabla = jsPDF & { lastAutoTable?: { finalY: number } }
+
+function obtenerFinTabla(doc: jsPDF): number {
+  return (doc as DocumentoConTabla).lastAutoTable?.finalY ?? 0
+}
+
 export function generarPDFConsulta(datos: DatosPDF): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const ahora = new Date()
@@ -125,7 +131,7 @@ export function generarPDFConsulta(datos: DatosPDF): void {
       alternateRowStyles: { fillColor: [248, 250, 252] },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 }, 1: { cellWidth: 'auto' } }
     })
-    y = (doc as any).lastAutoTable.finalY + 6
+    y = obtenerFinTabla(doc) + 6
   }
 
   // ── DIAGNÓSTICO ───────────────────────────────────────────────────────
@@ -177,7 +183,7 @@ export function generarPDFConsulta(datos: DatosPDF): void {
     alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles: { 0: { cellWidth: 60 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 35, halign: 'right' } }
   })
-  y = (doc as any).lastAutoTable.finalY + 6
+  y = obtenerFinTabla(doc) + 6
 
   // ── FACTURA ───────────────────────────────────────────────────────────
   const totalMedicamentos = datos.medicamentos.reduce((acc, m) => acc + m.precio, 0)
@@ -215,7 +221,7 @@ export function generarPDFConsulta(datos: DatosPDF): void {
       }
     }
   })
-  y = (doc as any).lastAutoTable.finalY + 12
+  y = obtenerFinTabla(doc) + 12
 
   // ── PIE DE PÁGINA ─────────────────────────────────────────────────────
   doc.setDrawColor(203, 213, 225)

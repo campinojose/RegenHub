@@ -1,11 +1,7 @@
 import { createClient } from '@/lib/supabase'
+import type { PerfilUsuario } from '@/lib/types'
 
-export interface PerfilUsuario {
-  id: string
-  nombre_completo: string
-  rol: 'recepcionista' | 'asistente'
-  id_doctor_favorito: string | null
-}
+export type { PerfilUsuario } from '@/lib/types'
 
 /**
  * Obtiene el perfil del usuario actualmente autenticado desde la tabla perfiles_usuario.

@@ -1,15 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import type { Paciente } from '@/lib/types'
+
+function crearRutaDocumento(file: File) {
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    return `pacientes/${crypto.randomUUID()}.${extension}`
+}
 
 export default function DashboardPage() {
     const router = useRouter()
-    const supabase = createClient()
+    const supabase = useMemo(() => createClient(), [])
 
-    const [usuario, setUsuario] = useState<any>(null)
-    const [pacientes, setPacientes] = useState<any[]>([])
+    const [usuario, setUsuario] = useState<{ email?: string | null } | null>(null)
+    const [pacientes, setPacientes] = useState<Paciente[]>([])
     const [busqueda, setBusqueda] = useState('')
     const [loading, setLoading] = useState(true)
 
@@ -36,6 +42,19 @@ export default function DashboardPage() {
     const [email, setEmail] = useState('')
     const [guardandoPaciente, setGuardandoPaciente] = useState(false)
 
+    const cargarPacientes = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('pacientes')
+            .select('*')
+            .order('created_at', { ascending: false })
+
+        if (error) {
+            console.error('Error al cargar pacientes:', error)
+            return
+        }
+        setPacientes((data || []) as Paciente[])
+    }, [supabase])
+
     useEffect(() => {
         async function inicializar() {
             setLoading(true)
@@ -52,20 +71,7 @@ export default function DashboardPage() {
         }
 
         inicializar()
-    }, [])
-
-    const cargarPacientes = async () => {
-        const { data, error } = await supabase
-            .from('pacientes')
-            .select('*')
-            .order('created_at', { ascending: false })
-
-        if (error) {
-            console.error('Error al cargar pacientes:', error)
-        } else {
-            setPacientes(data || [])
-        }
-    }
+    }, [cargarPacientes, router, supabase])
 
     const handleRegistrarPaciente = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -75,9 +81,12 @@ export default function DashboardPage() {
 
         // 1. Subir la foto del documento si se adjuntó
         if (fotoDocumento) {
-            const fileExt = fotoDocumento.name.split('.').pop()
-            const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-            const filePath = `pacientes/${fileName}`
+            if (!fotoDocumento.type.startsWith('image/') || fotoDocumento.size > 5 * 1024 * 1024) {
+                alert('La cédula debe ser una imagen de máximo 5 MB.')
+                setGuardandoPaciente(false)
+                return
+            }
+            const filePath = crearRutaDocumento(fotoDocumento)
 
             const { error: uploadError } = await supabase.storage
                 .from('cedulas-pacientes')
@@ -86,11 +95,7 @@ export default function DashboardPage() {
             if (uploadError) {
                 console.error('Error al subir la imagen:', uploadError)
             } else {
-                const { data: publicUrlData } = supabase.storage
-                    .from('cedulas-pacientes')
-                    .getPublicUrl(filePath)
-
-                urlFoto = publicUrlData.publicUrl
+                urlFoto = filePath
             }
         }
 
@@ -100,14 +105,13 @@ export default function DashboardPage() {
                 nombre_completo: nombre,
                 documento_identidad: documento || null,
                 foto_cedula_frente: urlFoto,
-                created_at: created_at || null,
+                fecha_registro: created_at || null,
                 edad: edad ? parseInt(edad) : null,
                 sexo: sexo,
                 direccion: direccion || null,
                 barrio: barrio || null,
                 telefono: telefono || null,
                 email: email || null,
-                correo: email || null,
             }
         ])
 
@@ -217,7 +221,7 @@ export default function DashboardPage() {
                                         </p>
                                     </div>
                                     <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                                        {paciente.sexo || paciente.genero || 'N/A'}
+                                        {paciente.sexo || 'N/A'}
                                     </span>
                                 </div>
                             ))
