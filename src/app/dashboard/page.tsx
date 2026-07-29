@@ -26,6 +26,8 @@ export default function DashboardPage() {
     const [pacientes, setPacientes] = useState<Paciente[]>([])
     const [busqueda, setBusqueda] = useState('')
     const [loading, setLoading] = useState(true)
+    const [perfil, setPerfil] = useState<any>(null)
+    const [doctorRestringidoId, setDoctorRestringidoId] = useState<string | null>(null)
 
     // Obtener la fecha de hoy en formato YYYY-MM-DD local
     const obtenerFechaHoy = () => {
@@ -52,11 +54,17 @@ export default function DashboardPage() {
     const [guardandoPaciente, setGuardandoPaciente] = useState(false)
     const [eliminandoPacienteId, setEliminandoPacienteId] = useState<string | null>(null)
 
-    const cargarPacientes = useCallback(async () => {
-        const { data, error } = await supabase
+    const cargarPacientes = useCallback(async (doctorId?: string | null) => {
+        let query = supabase
             .from('pacientes')
             .select('*')
             .order('created_at', { ascending: false })
+
+        if (doctorId) {
+            query = query.eq('id_doctor_elegido', doctorId)
+        }
+
+        const { data, error } = await query
 
         if (error) {
             console.error('Error al cargar pacientes:', error)
@@ -94,8 +102,27 @@ export default function DashboardPage() {
             }
             setUsuario(user)
 
+            const { data: perfilData } = await supabase
+                .from('perfiles_usuario')
+                .select('*')
+                .eq('id', user.id)
+                .single()
+            setPerfil(perfilData)
+
+            let restrictedDoctorId = null
+            if (perfilData && perfilData.nombre_completo) {
+                const nombreLower = perfilData.nombre_completo.toLowerCase()
+                if (nombreLower.includes('clemente') || nombreLower.includes('rosa') || 
+                    nombreLower.includes('andrés') || nombreLower.includes('andres') || 
+                    nombreLower.includes('carolina')) {
+                    const df = DOCTORES_FIJOS.find(d => nombreLower.includes(d.nombre_completo.split(' ')[0].toLowerCase()))
+                    if (df) restrictedDoctorId = df.id
+                }
+            }
+            setDoctorRestringidoId(restrictedDoctorId)
+
             await cargarDoctores()
-            await cargarPacientes()
+            await cargarPacientes(restrictedDoctorId)
             setLoading(false)
         }
 
@@ -167,7 +194,7 @@ export default function DashboardPage() {
             if (pacienteId) {
                 router.push(`/pacientes/${encodeURIComponent(pacienteId)}`)
             } else {
-                cargarPacientes()
+                cargarPacientes(doctorRestringidoId)
             }
         }
         setGuardandoPaciente(false)
@@ -224,39 +251,43 @@ export default function DashboardPage() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-100 flex flex-col">
+        <div className="min-h-screen bg-surface-50 flex flex-col">
             {/* HEADER */}
-            <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold">
-                        +
+            <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4 flex justify-between items-center shadow-sm sticky top-0 z-40">
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-sm">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                        </svg>
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold text-slate-800 leading-none">Panel Médico y Consultorio</h1>
-                        <span className="text-xs text-slate-500">
-                            Usuario: <strong className="text-slate-700">{usuario?.email || 'Administrador'}</strong>
+                        <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-none">RegenHub</h1>
+                        <span className="text-xs text-slate-500 font-medium">
+                            Conectado como <strong className="text-brand-700">{usuario?.email || 'Administrador'}</strong>
                         </span>
                     </div>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex items-center gap-3">
                     <button
                         onClick={() => router.push('/recepcionista/ingresos')}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition"
+                        className="btn-secondary text-brand-700 border-brand-200 hover:bg-brand-50 hover:border-brand-300"
                     >
-                        📊 Ver Ingresos
+                        📊 Ingresos
                     </button>
-                    <button
-                        onClick={() => setModalAbierto(true)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition"
-                    >
-                        + Registrar Paciente
-                    </button>
+                    {!doctorRestringidoId && (
+                        <button
+                            onClick={() => setModalAbierto(true)}
+                            className="btn-primary"
+                        >
+                            + Nuevo Paciente
+                        </button>
+                    )}
                     <button
                         onClick={handleCerrarSesion}
-                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition"
+                        className="btn-secondary text-slate-500"
                     >
-                        Cerrar Sesión
+                        Salir
                     </button>
                 </div>
             </header>
@@ -265,16 +296,19 @@ export default function DashboardPage() {
             <main className="flex-1 p-6 max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-3 gap-6">
 
                 {/* COLUMNA IZQUIERDA: PACIENTES */}
-                <section className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-col h-[calc(100vh-140px)]">
-                    <h2 className="font-bold text-slate-800 text-base mb-3">Pacientes Registrados</h2>
+                <section className="glass-card p-5 h-[calc(100vh-140px)] flex flex-col">
+                    <h2 className="font-bold text-slate-900 text-lg mb-4 tracking-tight">Pacientes</h2>
 
-                    <input
-                        type="text"
-                        placeholder="🔍 Buscar por nombre o cédula..."
-                        value={busqueda}
-                        onChange={(e) => setBusqueda(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-xl text-xs bg-slate-50 mb-4 outline-none focus:ring-2 focus:ring-blue-500 text-black"
-                    />
+                    <div className="relative mb-4">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                        <input
+                            type="text"
+                            placeholder="Buscar por nombre o cédula..."
+                            value={busqueda}
+                            onChange={(e) => setBusqueda(e.target.value)}
+                            className="input-premium pl-9"
+                        />
+                    </div>
 
                     <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                         {loading ? (
@@ -286,16 +320,22 @@ export default function DashboardPage() {
                                 <div
                                     key={paciente.id}
                                     onClick={() => router.push(`/pacientes/${paciente.id}`)}
-                                    className="p-3 border border-slate-100 rounded-xl hover:border-blue-300 hover:bg-blue-50/50 cursor-pointer transition flex justify-between items-center"
+                                    className="p-3.5 bg-white border border-slate-100 rounded-xl hover:border-brand-200 hover:bg-brand-50/30 hover:shadow-sm cursor-pointer transition-all flex justify-between items-center group"
                                 >
                                     <div>
-                                        <h3 className="font-bold text-xs text-slate-800">{paciente.nombre_completo}</h3>
-                                        <p className="text-[11px] text-slate-500 mt-0.5">
-                                            C.C. {paciente.documento_identidad || 'S/N'} {paciente.telefono ? `| Tel: ${paciente.telefono}` : ''}
+                                        <h3 className="font-semibold text-sm text-slate-800 group-hover:text-brand-800 transition-colors">{paciente.nombre_completo}</h3>
+                                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 font-medium">
+                                            <span>CC {paciente.documento_identidad || 'S/N'}</span>
+                                            {paciente.telefono && (
+                                                <>
+                                                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                                    <span>{paciente.telefono}</span>
+                                                </>
+                                            )}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
+                                    <div className="flex flex-col items-end gap-1.5">
+                                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md uppercase tracking-wider">
                                             {paciente.sexo || 'N/A'}
                                         </span>
                                         <button
@@ -305,10 +345,10 @@ export default function DashboardPage() {
                                                 handleEliminarPaciente(paciente)
                                             }}
                                             disabled={eliminandoPacienteId === paciente.id}
-                                            className="text-[10px] font-bold text-red-600 hover:text-red-700 disabled:text-slate-400"
+                                            className="text-[10px] font-bold text-slate-400 hover:text-red-600 disabled:text-slate-300 transition-colors"
                                             aria-label={`Eliminar a ${paciente.nombre_completo}`}
                                         >
-                                            {eliminandoPacienteId === paciente.id ? 'Eliminando…' : 'Eliminar'}
+                                            {eliminandoPacienteId === paciente.id ? 'Borrando…' : 'Eliminar'}
                                         </button>
                                     </div>
                                 </div>
@@ -318,78 +358,79 @@ export default function DashboardPage() {
                 </section>
 
                 {/* COLUMNA DERECHA */}
-                <section className="md:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center">
-                    <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl mb-2">
+                <section className="md:col-span-2 glass-card p-6 flex flex-col items-center justify-center text-center">
+                    <div className="w-16 h-16 bg-brand-50 text-brand-600 rounded-2xl flex items-center justify-center text-3xl mb-4 shadow-sm">
                         📋
                     </div>
-                    <p className="text-xs font-medium text-slate-500">
-                        Selecciona un paciente de la lista de la izquierda para ver su historia médica.
+                    <h3 className="text-lg font-bold text-slate-800 mb-1">Historia Médica</h3>
+                    <p className="text-sm font-medium text-slate-500 max-w-sm">
+                        Selecciona un paciente del listado para ver sus consultas, diagnósticos e información general.
                     </p>
                 </section>
             </main>
 
             {/* MODAL COMPLETO DE REGISTRO DE PACIENTE */}
             {modalAbierto && (
-                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-                    <div className="bg-white rounded-2xl p-6 shadow-xl max-w-xl w-full my-8 space-y-4 max-h-[90vh] overflow-y-auto">
-                        <div className="border-b border-slate-100 pb-3">
-                            <h3 className="text-base font-bold text-slate-800">Registrar Nuevo Paciente</h3>
-                            <p className="text-xs text-slate-500">Ingresa la información personal del paciente.</p>
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-floating max-w-xl w-full my-8 space-y-5 max-h-[90vh] overflow-y-auto border border-slate-200/50">
+                        <div className="border-b border-slate-100 pb-4 mb-2">
+                            <h3 className="text-xl font-bold text-slate-900 tracking-tight">Registrar Nuevo Paciente</h3>
+                            <p className="text-sm font-medium text-slate-500 mt-1">Ingresa la información personal y de contacto.</p>
                         </div>
 
-                        <form onSubmit={handleRegistrarPaciente} className="space-y-4">
+                        <form onSubmit={handleRegistrarPaciente} className="space-y-5">
 
                             {/* NOMBRE COMPLETO */}
                             <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre Completo *</label>
+                                <label className="label-premium">Nombre Completo *</label>
                                 <input
                                     type="text"
                                     required
-                                    placeholder="Ej: María Rodríguez Castano"
+                                    placeholder="Ej: María Rodríguez"
                                     value={nombre}
                                     onChange={(e) => setNombre(e.target.value)}
-                                    className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                    className="input-premium"
                                 />
                             </div>
 
                             {/* DOCUMENTO Y FOTO DELANTERA */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Documento de Identidad (C.C.) *</label>
+                                    <label className="label-premium">Documento (C.C.) *</label>
                                     <input
                                         type="text"
                                         required
                                         placeholder="Ej: 1104821170"
                                         value={documento}
                                         onChange={(e) => setDocumento(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Foto Delantera del Documento</label>
+                                    <label className="label-premium">Foto Delantera del Documento</label>
                                     <input
                                         type="file"
                                         accept="image/*"
                                         onChange={(e) => setFotoDocumento(e.target.files?.[0] || null)}
-                                        className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                        className="w-full text-sm text-slate-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 transition-colors"
                                     />
                                 </div>
                             </div>
 
                             {/* FECHA PRIMERA CONSULTA, EDAD Y SEXO */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Fecha de Primera Consulta</label>
+                                    <label className="label-premium">Fecha Ingreso</label>
                                     <input
                                         type="date"
                                         value={created_at}
                                         onChange={(e) => setcreated_at(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Edad</label>
+                                    <label className="label-premium">Edad</label>
                                     <input
                                         type="number"
                                         placeholder="Años"
@@ -399,15 +440,15 @@ export default function DashboardPage() {
                                         step="1"
                                         value={edad}
                                         onChange={(e) => setEdad(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Sexo / Género</label>
+                                    <label className="label-premium">Sexo</label>
                                     <select
                                         value={sexo}
                                         onChange={(e) => setSexo(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     >
                                         <option value="Masculino">Masculino</option>
                                         <option value="Femenino">Femenino</option>
@@ -416,96 +457,94 @@ export default function DashboardPage() {
                             </div>
 
                             {/* DIRECCIÓN Y Barrio */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Dirección de Residencia</label>
+                                    <label className="label-premium">Dirección</label>
                                     <input
                                         type="text"
                                         placeholder="Ej: Calle 10 # 4-20"
                                         value={direccion}
                                         onChange={(e) => setDireccion(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Barrio</label>
+                                    <label className="label-premium">Barrio</label>
                                     <input
                                         type="text"
-                                        placeholder="Ej: Ciudad 2000 / Calipso"
+                                        placeholder="Ej: Ciudad 2000"
                                         value={barrio}
                                         onChange={(e) => setBarrio(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
-
-                                
                             </div>
 
                             {/* TELÉFONO Y EMAIL */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono / WhatsApp</label>
+                                    <label className="label-premium">WhatsApp</label>
                                     <input
                                         type="text"
-                                        placeholder="Ej: 30022768456"
+                                        placeholder="Ej: 3002276845"
                                         value={telefono}
                                         onChange={(e) => setTelefono(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico</label>
+                                    <label className="label-premium">Email</label>
                                     <input
                                         type="email"
                                         placeholder="paciente@ejemplo.com"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                                        className="input-premium"
                                     />
                                 </div>
                             </div>
 
                             {/* Profesional elegido */}
                             <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Profesional Elegido *</label>
-                                    <select
-                                        required
-                                        value={doctorElegidoId}
-                                        onChange={(e) => setDoctorElegidoId(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
-                                    >
-                                        {doctores.length === 0 ? (
-                                            <option value="">No hay doctores registrados</option>
-                                        ) : (
-                                            doctores.map((doctor) => (
-                                                <option key={doctor.id} value={doctor.id}>
-                                                    {doctor.nombre_completo}
-                                                </option>
-                                            ))
-                                        )}
-                                    </select>
-                                </div>
+                                <label className="label-premium">Profesional Asignado *</label>
+                                <select
+                                    required
+                                    value={doctorElegidoId}
+                                    onChange={(e) => setDoctorElegidoId(e.target.value)}
+                                    className="input-premium"
+                                >
+                                    {doctores.length === 0 ? (
+                                        <option value="">No hay doctores registrados</option>
+                                    ) : (
+                                        doctores.map((doctor) => (
+                                            <option key={doctor.id} value={doctor.id}>
+                                                Dr(a). {doctor.nombre_completo}
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                            </div>
 
                             {/* BOTONES DE ACCIÓN */}
-                            <div className="flex gap-2 pt-3 border-t border-slate-100">
+                            <div className="flex gap-3 pt-5 border-t border-slate-100 mt-6">
                                 <button
                                     type="button"
                                     onClick={() => {
                                         limpiarFormulario()
                                         setModalAbierto(false)
                                     }}
-                                    className="flex-1 py-2.5 bg-slate-200 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-300 transition"
+                                    className="btn-secondary flex-1"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={guardandoPaciente}
-                                    className="flex-1 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition"
+                                    className="btn-primary flex-1"
                                 >
-                                    {guardandoPaciente ? 'Guardando Paciente...' : 'Guardar Paciente'}
+                                    {guardandoPaciente ? 'Guardando...' : 'Guardar Paciente'}
                                 </button>
                             </div>
                         </form>

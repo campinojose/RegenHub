@@ -3,9 +3,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import type { Consulta } from '@/lib/types'
+import type { Consulta, Doctor } from '@/lib/types'
 
 type Periodo = 'hoy' | 'semana' | 'mes'
+
+const DOCTORES_FIJOS: Doctor[] = [
+    { id: 'a142aea4-d90f-469f-9ff2-d56d057676cb', nombre_completo: 'Clemente Herrera' },
+    { id: 'a5f41fcf-5950-4b29-aad1-ded22f57ccf2', nombre_completo: 'Andrés Herrera' },
+    { id: 'c2cde56e-7fae-4ac4-b352-f3506c78137d', nombre_completo: 'Rosa Castaño' },
+    { id: 'f8c7116d-1c8b-4d2f-927c-0d48296f2dfd', nombre_completo: 'Carolina Herrera' },
+]
 
 export default function IngresosRecepcionistaPage() {
   const router = useRouter()
@@ -28,10 +35,26 @@ export default function IngresosRecepcionistaPage() {
         .eq('id', user.id)
         .single()
 
-      if (!perfil || perfil.rol !== 'recepcionista') {
+      if (!perfil || (perfil.rol !== 'recepcionista' && perfil.rol !== 'doctor' && perfil.rol !== 'administrador')) {
         router.push('/asistente')
         return
       }
+
+      let restrictedDoctorId = null
+      if (perfil.nombre_completo) {
+          const nombreLower = perfil.nombre_completo.toLowerCase()
+          if (nombreLower.includes('clemente') || nombreLower.includes('rosa') || 
+              nombreLower.includes('andrés') || nombreLower.includes('andres') || 
+              nombreLower.includes('carolina')) {
+              const df = DOCTORES_FIJOS.find(d => nombreLower.includes(d.nombre_completo.split(' ')[0].toLowerCase()))
+              if (df) restrictedDoctorId = df.id
+          }
+      }
+      
+      // Si el rol es recepcionista o administrador, pueden ver todo.
+      // Pero si son doctores restringidos, solo ven lo de ellos.
+      // Si el requerimiento es estricto, aplicamos la restricción si se encontró su ID.
+
       setPerfilNombre(perfil.nombre_completo || '')
 
       const ahora = new Date()
@@ -47,7 +70,7 @@ export default function IngresosRecepcionistaPage() {
         fechaDesde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('consultas')
         .select(`
           *,
@@ -56,6 +79,12 @@ export default function IngresosRecepcionistaPage() {
         `)
         .gte('created_at', fechaDesde.toISOString())
         .order('created_at', { ascending: false })
+
+      if (restrictedDoctorId) {
+        query = query.eq('id_doctor', restrictedDoctorId)
+      }
+
+      const { data, error } = await query
 
       if (error) console.error('Error:', error)
       setConsultas((data || []) as unknown as Consulta[])
@@ -108,27 +137,29 @@ export default function IngresosRecepcionistaPage() {
   const labelPeriodo: Record<Periodo, string> = { hoy: 'Hoy', semana: 'Esta Semana', mes: 'Este Mes' }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
+    <div className="min-h-screen bg-surface-50 flex flex-col">
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4 flex justify-between items-center shadow-sm sticky top-0 z-40">
         <div>
-          <h1 className="text-lg font-bold text-slate-800">Panel de Ingresos — General</h1>
-          <p className="text-xs text-slate-500">Recepcionista: {perfilNombre}</p>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight">Panel de Ingresos</h1>
+          <p className="text-xs font-medium text-slate-500">Sesión actual: {perfilNombre}</p>
         </div>
-        <button onClick={() => router.push('/dashboard')} className="text-sm font-semibold text-slate-600 hover:text-slate-900">
-          ← Volver
+        <button onClick={() => router.push('/dashboard')} className="btn-secondary">
+          ← Volver al Dashboard
         </button>
       </header>
 
       <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-5">
 
         {/* FILTROS */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 p-1 bg-white/50 backdrop-blur-sm border border-slate-200/60 rounded-xl w-fit shadow-sm">
           {(['hoy', 'semana', 'mes'] as Periodo[]).map(p => (
             <button
               key={p}
               onClick={() => setPeriodo(p)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition border ${
-                periodo === p ? 'bg-blue-600 text-white border-blue-600 shadow' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'
+              className={`px-5 py-2 rounded-lg text-xs font-bold transition-all ${
+                periodo === p 
+                  ? 'bg-brand-600 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
               {labelPeriodo[p]}
@@ -137,32 +168,32 @@ export default function IngresosRecepcionistaPage() {
         </div>
 
         {/* TARJETAS RESUMEN GLOBAL */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Ingresos</p>
-            <p className="text-2xl font-bold text-slate-800 mt-1">${totalIngresos.toLocaleString()}</p>
-            <p className="text-xs text-slate-400">COP — {labelPeriodo[periodo]}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          <div className="glass-card p-6 flex flex-col justify-center border-l-4 border-l-brand-500">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Total Generado</p>
+            <p className="text-3xl font-bold text-slate-900 tracking-tight">${totalIngresos.toLocaleString()}</p>
+            <p className="text-[11px] font-medium text-slate-400 mt-1">COP — {labelPeriodo[periodo]}</p>
           </div>
-          <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-200 shadow-sm">
-            <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider">Total Pagado</p>
-            <p className="text-2xl font-bold text-emerald-700 mt-1">${totalPagado.toLocaleString()}</p>
-            <p className="text-xs text-emerald-500">COP</p>
+          <div className="glass-card p-6 flex flex-col justify-center border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50/50 to-white">
+            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-1">Recaudado</p>
+            <p className="text-3xl font-bold text-emerald-700 tracking-tight">${totalPagado.toLocaleString()}</p>
+            <p className="text-[11px] font-medium text-emerald-500 mt-1">Dinero ingresado efectivamente</p>
           </div>
-          <div className="bg-amber-50 rounded-2xl p-5 border border-amber-200 shadow-sm">
-            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Pendiente</p>
-            <p className="text-2xl font-bold text-amber-700 mt-1">${totalPendiente.toLocaleString()}</p>
-            <p className="text-xs text-amber-500">COP</p>
+          <div className="glass-card p-6 flex flex-col justify-center border-l-4 border-l-amber-500 bg-gradient-to-br from-amber-50/50 to-white">
+            <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1">Pendiente</p>
+            <p className="text-3xl font-bold text-amber-700 tracking-tight">${totalPendiente.toLocaleString()}</p>
+            <p className="text-[11px] font-medium text-amber-500 mt-1">Saldos por cobrar</p>
           </div>
         </div>
 
         {/* RESUMEN POR PROFESIONAL */}
         {Object.keys(porDoctor).length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {Object.entries(porDoctor).map(([nombre, data]) => (
-              <div key={nombre} className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <p className="text-[10px] font-bold text-blue-600 uppercase truncate">{nombre}</p>
-                <p className="text-lg font-bold text-slate-800 mt-1">${data.total.toLocaleString()}</p>
-                <p className="text-xs text-slate-400">{data.count} consulta{data.count !== 1 ? 's' : ''}</p>
+              <div key={nombre} className="glass-card p-5 hover:shadow-floating transition-shadow duration-300">
+                <p className="text-[10px] font-bold text-brand-600 uppercase tracking-wider truncate mb-1">{nombre}</p>
+                <p className="text-xl font-bold text-slate-900">${data.total.toLocaleString()}</p>
+                <p className="text-[11px] font-medium text-slate-500 mt-1">{data.count} atencione{data.count !== 1 ? 's' : ''}</p>
               </div>
             ))}
           </div>
@@ -170,59 +201,62 @@ export default function IngresosRecepcionistaPage() {
 
         {/* TABLA */}
         {loading ? (
-          <div className="bg-white rounded-2xl p-10 text-center border border-slate-200">
-            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-slate-500 text-sm">Cargando datos...</p>
+          <div className="glass-card p-12 text-center flex flex-col items-center justify-center">
+            <div className="w-10 h-10 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin mb-4"></div>
+            <p className="text-slate-500 font-medium text-sm tracking-wide">Cargando registros financieros...</p>
           </div>
         ) : consultas.length === 0 ? (
-          <div className="bg-white rounded-2xl p-10 text-center border border-slate-200">
-            <p className="text-slate-400 text-sm">No hay consultas en este período.</p>
+          <div className="glass-card p-12 text-center">
+            <p className="text-slate-500 font-medium text-sm">No se encontraron consultas facturadas en este período.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50/50 border-b border-slate-100">
                   <tr>
-                    <th className="text-left px-4 py-3 font-bold text-slate-600 uppercase">Fecha</th>
-                    <th className="text-left px-4 py-3 font-bold text-slate-600 uppercase">Paciente</th>
-                    <th className="text-left px-4 py-3 font-bold text-slate-600 uppercase">Profesional</th>
-                    <th className="text-right px-4 py-3 font-bold text-slate-600 uppercase">Total</th>
-                    <th className="text-center px-4 py-3 font-bold text-slate-600 uppercase">Estado</th>
+                    <th className="text-left px-5 py-4 font-bold text-slate-700 text-xs uppercase tracking-widest">Fecha</th>
+                    <th className="text-left px-5 py-4 font-bold text-slate-700 text-xs uppercase tracking-widest">Paciente</th>
+                    <th className="text-left px-5 py-4 font-bold text-slate-700 text-xs uppercase tracking-widest">Profesional</th>
+                    <th className="text-right px-5 py-4 font-bold text-slate-700 text-xs uppercase tracking-widest">Total Factura</th>
+                    <th className="text-center px-5 py-4 font-bold text-slate-700 text-xs uppercase tracking-widest">Cobranza</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100/60">
                   {consultas.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 text-slate-500">
-                        {new Date(c.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-4 text-slate-500 font-medium whitespace-nowrap">
+                        {new Date(c.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4">
                         <span className="font-semibold text-slate-800">{c.pacientes?.nombre_completo || 'N/A'}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="bg-violet-50 text-violet-700 font-semibold px-2 py-0.5 rounded-full text-[10px]">
+                      <td className="px-5 py-4">
+                        <span className="bg-slate-100 text-slate-700 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wider">
                           {c.doctores?.nombre_completo || 'N/A'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-slate-800">
-                        ${((c.precio_consulta || 50000) + (obtenerEstadoPagoMedicamentos(c) === 'pagado' ? obtenerMontoMedicamentos(c) : 0)).toLocaleString()} <span className="text-slate-400 font-normal">COP</span>
+                      <td className="px-5 py-4 text-right font-bold text-slate-800">
+                        ${((c.precio_consulta || 50000) + (obtenerEstadoPagoMedicamentos(c) === 'pagado' ? obtenerMontoMedicamentos(c) : 0)).toLocaleString()} <span className="text-slate-400 font-medium text-xs">COP</span>
                         {obtenerMontoMedicamentos(c) ? (
-                          <span className="block text-[10px] font-semibold text-slate-400 mt-1">
-                            Medicamentos: ${Number(obtenerMontoMedicamentos(c)).toLocaleString()} {obtenerEstadoPagoMedicamentos(c) === 'pagado' ? 'pagados' : 'pendientes'}
+                          <span className="block text-[11px] font-semibold text-slate-400 mt-1">
+                            Meds: ${Number(obtenerMontoMedicamentos(c)).toLocaleString()} 
+                            <span className={obtenerEstadoPagoMedicamentos(c) === 'pagado' ? 'text-emerald-500 ml-1' : 'text-amber-500 ml-1'}>
+                              ({obtenerEstadoPagoMedicamentos(c) === 'pagado' ? 'Pagados' : 'Pendientes'})
+                            </span>
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-5 py-4 text-center">
                         <button
                           onClick={() => toggleEstadoPago(c.id, obtenerEstadoPagoMedicamentos(c))}
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold transition ${
+                          className={`px-4 py-1.5 rounded-full text-[11px] font-bold tracking-wide transition-all active:scale-95 ${
                             obtenerEstadoPagoMedicamentos(c) === 'pagado'
                               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                               : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                           }`}
                         >
-                          {obtenerEstadoPagoMedicamentos(c) === 'pagado' ? '✓ Medicamentos pagados' : '⏳ Medicamentos pendientes'}
+                          {obtenerEstadoPagoMedicamentos(c) === 'pagado' ? '✓ Abonado' : '⏳ Cobrar Medicamentos'}
                         </button>
                       </td>
                     </tr>
