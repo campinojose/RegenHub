@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { generarPDFConsulta } from '@/lib/generarPDF'
+import type { Doctor, Paciente, PerfilUsuario } from '@/lib/types'
 
 interface MedicamentoItem {
   nombre: string
@@ -11,17 +12,19 @@ interface MedicamentoItem {
   precio: number | string
 }
 
+const VALOR_CONSULTA_FIJO = 50000
+
 function NuevaConsultaContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const pacienteId = searchParams.get('pacienteId')
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   // Estados de Doctores y Paciente
-  const [listaDoctores, setListaDoctores] = useState<any[]>([])
+  const [listaDoctores, setListaDoctores] = useState<Doctor[]>([])
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('')
-  const [paciente, setPaciente] = useState<any>(null)
-  const [perfilAsistente, setPerfilAsistente] = useState<any>(null)
+  const [paciente, setPaciente] = useState<Paciente | null>(null)
+  const [perfilAsistente, setPerfilAsistente] = useState<PerfilUsuario | null>(null)
   
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(true)
@@ -32,12 +35,10 @@ function NuevaConsultaContent() {
   const [pesoKg, setPesoKg] = useState('')
   const [tallaCm, setTallaCm] = useState('')
   const [presionArterial, setPresionArterial] = useState('')
-  const [frecuenciaCardiaca, setFrecuenciaCardiaca] = useState('')
-  const [temperatura, setTemperatura] = useState('')
   const [tratamiento, setTratamiento] = useState('')
+  const [estadoPagoMedicamentos, setEstadoPagoMedicamentos] = useState<'pendiente' | 'pagado'>('pendiente')
 
   // Facturación y Medicamentos
-  const [valorConsulta, setValorConsulta] = useState<number | string>(50000)
   const [medicamentos, setMedicamentos] = useState<MedicamentoItem[]>([
     { nombre: '', indicacion: '', precio: '' }
   ])
@@ -58,7 +59,7 @@ function NuevaConsultaContent() {
           .select('*')
           .eq('id', user.id)
           .single()
-        if (perfil) setPerfilAsistente({ ...perfil, id: user.id })
+        if (perfil) setPerfilAsistente({ ...perfil, id: user.id } as PerfilUsuario)
 
         // 1. Cargar todos los doctores disponibles
         const { data: docs, error: errDocs } = await supabase
@@ -72,23 +73,11 @@ function NuevaConsultaContent() {
         }
 
         if (docs && docs.length > 0) {
-          setListaDoctores(docs)
-          
-          // Pre-seleccionar doctor favorito si existe
-          const doctorFavorito = perfil?.id_doctor_favorito
-          const docCoincidente = docs.find(
-            d => d.id === user.id || d.email === user.email || d.id === doctorFavorito
-          )
-
-          if (docCoincidente) {
-            setSelectedDoctorId(docCoincidente.id)
-          } else {
-            // Si no coincide, seleccionar el primero por defecto
-            setSelectedDoctorId(docs[0].id)
-          }
+          setListaDoctores(docs as Doctor[])
         }
 
         // 2. Cargar información del paciente
+        let pacienteCargado: Paciente | null = null
         if (pacienteId) {
           const { data: pac, error: errPac } = await supabase
             .from('pacientes')
@@ -97,7 +86,16 @@ function NuevaConsultaContent() {
             .maybeSingle()
 
           if (errPac) console.error('Error al cargar paciente:', errPac)
-          if (pac) setPaciente(pac)
+          if (pac) {
+            pacienteCargado = pac as Paciente
+            setPaciente(pacienteCargado)
+          }
+        }
+
+        if (docs && docs.length > 0) {
+          const doctorInicialId = pacienteCargado?.id_doctor_elegido || perfil?.id_doctor_favorito || docs[0].id
+          const docCoincidente = docs.find((doc) => doc.id === doctorInicialId)
+          setSelectedDoctorId(docCoincidente?.id || docs[0].id)
         }
       } catch (err) {
         console.error('Error en la carga de datos:', err)
@@ -107,7 +105,7 @@ function NuevaConsultaContent() {
     }
 
     loadData()
-  }, [pacienteId])
+  }, [pacienteId, router, supabase])
 
   // Obtener el doctor seleccionado actualmente
   const doctorSeleccionado = listaDoctores.find(d => d.id === selectedDoctorId)
@@ -126,7 +124,7 @@ function NuevaConsultaContent() {
   }
 
   // Actualizar campo de medicamento
-  const handleUpdateMedicamento = (index: number, field: keyof MedicamentoItem, value: any) => {
+  const handleUpdateMedicamento = (index: number, field: keyof MedicamentoItem, value: MedicamentoItem[keyof MedicamentoItem]) => {
     const updated = [...medicamentos]
     updated[index] = { ...updated[index], [field]: value }
     setMedicamentos(updated)
@@ -134,7 +132,7 @@ function NuevaConsultaContent() {
 
   // Cálculos dinámicos
   const totalMedicamentos = medicamentos.reduce((acc, m) => acc + (Number(m.precio) || 0), 0)
-  const valorTotal = (Number(valorConsulta) || 0) + totalMedicamentos
+  const valorTotal = VALOR_CONSULTA_FIJO + totalMedicamentos
 
   // Formato Fecha Actual (DD/MM/YYYY)
   const fechaHoy = new Date().toLocaleDateString('es-CO', {
@@ -148,7 +146,7 @@ function NuevaConsultaContent() {
     const doctorNombre = doctorSeleccionado?.nombre_completo || 'Dr.'
     const pacienteNombre = paciente?.nombre_completo || 'Paciente'
     const pacienteCC = paciente?.documento_identidad || 'N/A'
-    const valConsultaStr = Number(valorConsulta || 0).toLocaleString()
+    const valConsultaStr = VALOR_CONSULTA_FIJO.toLocaleString()
     const totalStr = valorTotal.toLocaleString()
 
     const medFiltrados = medicamentos.filter(m => m.nombre.trim() !== '')
@@ -176,7 +174,7 @@ Fecha: ${fechaHoy}
 --------------------------------------------------
 1. Valor Consulta:                    $ ${valConsultaStr} COP
 --------------------------------------------------
-2. Medicamentos Recetados:
+2. Medicamentos Recetados (${estadoPagoMedicamentos === 'pagado' ? 'Pagados' : 'Pendientes'}):
 
 ${lineasMedicamentos}
 --------------------------------------------------
@@ -217,56 +215,55 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
       }))
 
     const totalMeds = medicamentosValidos.reduce((acc, m) => acc + m.precio, 0)
-    const totalFactura = (Number(valorConsulta) || 0) + totalMeds
+    const totalFactura = VALOR_CONSULTA_FIJO + totalMeds
 
     const { data: { user } } = await supabase.auth.getUser()
 
-    const objetoConsulta = {
-      id_paciente: paciente.id,
-      id_doctor: selectedDoctorId,
+    const { error } = await supabase.rpc('crear_consulta', {
+      estado_pago: 'pagado',
+      estado_pago_medicamentos: estadoPagoMedicamentos,
       id_asistente: user?.id || null,
+      id_doctor: selectedDoctorId,
+      id_paciente: paciente.id,
+      imc,
+      medicamentos: medicamentosValidos,
       motivo_consulta: motivoConsulta,
+      monto_medicamentos: totalMeds,
       peso_kg: pesoKg ? Number(pesoKg) : null,
-      talla_cm: tallaCm ? Number(tallaCm) : null,
-      imc: imc,
+      precio_consulta: VALOR_CONSULTA_FIJO,
       presion_arterial: presionArterial || null,
-      frecuencia_cardiaca: frecuenciaCardiaca ? Number(frecuenciaCardiaca) : null,
-      temperatura_c: temperatura ? Number(temperatura) : null,
-      tratamiento_realizado: tratamiento || null,
-      precio_consulta: Number(valorConsulta) || 0,
+      talla_cm: tallaCm ? Number(tallaCm) : null,
       total_factura: totalFactura,
-      estado_pago: 'pendiente',
-      medicamentos: medicamentosValidos
-    }
+      tratamiento_realizado: tratamiento || null
+    })
 
-    const { error } = await supabase.from('consultas').insert([objetoConsulta])
+    const errorReal = error && typeof error === 'object' && 'message' in error && (error as { message?: string }).message
 
-    if (error) {
+    if (errorReal) {
       console.error('Error Supabase:', error)
-      alert('Error al guardar la consulta: ' + error.message)
+      alert('Error al guardar la consulta: ' + errorReal)
     } else {
       // Generar PDF automáticamente
       const doctorActual = listaDoctores.find(d => d.id === selectedDoctorId)
       generarPDFConsulta({
         pacienteNombre: paciente.nombre_completo || 'N/A',
         pacienteCC: paciente.documento_identidad || 'N/A',
-        pacienteEdad: paciente.edad,
-        pacienteSexo: paciente.sexo,
-        pacienteDireccion: paciente.direccion,
-        pacienteTelefono: paciente.telefono,
+        pacienteEdad: paciente.edad ?? undefined,
+        pacienteSexo: paciente.sexo ?? undefined,
+        pacienteDireccion: paciente.direccion ?? undefined,
+        pacienteTelefono: paciente.telefono ?? undefined,
         doctorNombre: doctorActual?.nombre_completo || 'N/A',
         asistenteNombre: perfilAsistente?.nombre_completo || 'Asistente',
         pesoKg: pesoKg || undefined,
         tallaCm: tallaCm || undefined,
         imc: imc ?? undefined,
         presionArterial: presionArterial || undefined,
-        frecuenciaCardiaca: frecuenciaCardiaca || undefined,
-        temperatura: temperatura || undefined,
         motivoConsulta,
         diagnostico: tratamiento,
-        valorConsulta: Number(valorConsulta) || 0,
+        valorConsulta: VALOR_CONSULTA_FIJO,
         medicamentos: medicamentosValidos,
-        estadoPago: 'pendiente',
+        estadoPagoMedicamentos,
+        montoMedicamentos: totalMeds,
       })
       setGuardadoExitoso(true)
     }
@@ -323,7 +320,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                 >
                   {listaDoctores.map((doc) => (
                     <option key={doc.id} value={doc.id}>
-                      {doc.nombre_completo} {doc.especialidad ? `(${doc.especialidad})` : ''}
+                      {doc.nombre_completo}
                     </option>
                   ))}
                 </select>
@@ -427,12 +424,9 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                   <span className="text-sm font-bold text-slate-700">1. Valor Consulta (COP):</span>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-500">$</span>
-                    <input
-                      type="number"
-                      value={valorConsulta}
-                      onChange={(e) => setValorConsulta(e.target.value)}
-                      className="w-40 px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                    />
+                    <div className="w-40 px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm bg-slate-100 text-center">
+                      {VALOR_CONSULTA_FIJO.toLocaleString()}
+                    </div>
                   </div>
                 </div>
 
@@ -503,6 +497,32 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                   >
                     + Agregar otro medicamento
                   </button>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">Estado de Pago de Medicamentos</h3>
+                    <p className="text-xs text-slate-500">La consulta siempre queda pagada. Aquí solo controlas si los medicamentos quedaron pendientes o ya fueron cancelados.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEstadoPagoMedicamentos('pagado')}
+                      className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pagado' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'}`}
+                    >
+                      Medicamentos pagados
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEstadoPagoMedicamentos('pendiente')}
+                      className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pendiente' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-700 border-slate-300 hover:border-amber-400'}`}
+                    >
+                      Medicamentos pendientes
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    PDF: la consulta se mostrará como ingreso fijo de $50.000 y los medicamentos reflejarán si están pagados o pendientes.
+                  </p>
                 </div>
               </div>
 

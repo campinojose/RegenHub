@@ -10,15 +10,14 @@ export interface PerfilUsuario {
 export interface Doctor {
   id: string
   nombre_completo: string
-  especialidad: string | null
-  registro_medico: string | null
-  email: string | null
 }
 
 export interface Paciente {
   id: string
   nombre_completo: string
   documento_identidad: string | null
+  fecha_registro: string
+  id_doctor_elegido: string | null
   edad: number | null
   sexo: string | null
   direccion: string | null
@@ -43,15 +42,16 @@ export interface Consulta {
   precio_consulta: number | null
   total_factura: number | null
   estado_pago: 'pendiente' | 'pagado'
+  estado_pago_medicamentos: 'pendiente' | 'pagado'
+  monto_medicamentos: number | null
   medicamentos: Medicamento[] | null
   motivo_consulta?: string | null
   peso_kg?: number | null
   talla_cm?: number | null
   imc?: number | null
   presion_arterial?: string | null
-  frecuencia_cardiaca?: number | null
-  temperatura_c?: number | null
   tratamiento_realizado?: string | null
-  doctores?: Pick<Doctor, 'id' | 'nombre_completo' | 'especialidad' | 'registro_medico'> | null
+  doctores?: Pick<Doctor, 'id' | 'nombre_completo'> | null
   pacientes?: Pick<Paciente, 'nombre_completo' | 'documento_identidad'> | null
+  asistente?: { perfiles_usuario?: Pick<PerfilUsuario, 'nombre_completo'> | null } | null
 }

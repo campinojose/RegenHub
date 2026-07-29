@@ -19,8 +19,6 @@ interface DatosPDF {
   tallaCm?: string | number
   imc?: string | number
   presionArterial?: string
-  frecuenciaCardiaca?: string | number
-  temperatura?: string | number
 
   // Consulta
   motivoConsulta: string
@@ -29,7 +27,8 @@ interface DatosPDF {
   // Facturación
   valorConsulta: number
   medicamentos: { nombre: string; indicacion: string; precio: number }[]
-  estadoPago: string
+  estadoPagoMedicamentos: 'pendiente' | 'pagado'
+  montoMedicamentos: number
 }
 
 type DocumentoConTabla = jsPDF & { lastAutoTable?: { finalY: number } }
@@ -116,8 +115,6 @@ export function generarPDFConsulta(datos: DatosPDF): void {
       ['Talla', datos.tallaCm ? `${datos.tallaCm} cm` : '-'],
       ['IMC', datos.imc ? String(datos.imc) : '-'],
       ['Presión Arterial', datos.presionArterial || '-'],
-      ['F. Cardíaca', datos.frecuenciaCardiaca ? `${datos.frecuenciaCardiaca} bpm` : '-'],
-      ['Temperatura', datos.temperatura ? `${datos.temperatura} °C` : '-'],
     ]
 
     autoTable(doc, {
@@ -186,8 +183,10 @@ export function generarPDFConsulta(datos: DatosPDF): void {
   y = obtenerFinTabla(doc) + 6
 
   // ── FACTURA ───────────────────────────────────────────────────────────
-  const totalMedicamentos = datos.medicamentos.reduce((acc, m) => acc + m.precio, 0)
+  const totalMedicamentos = datos.montoMedicamentos || datos.medicamentos.reduce((acc, m) => acc + m.precio, 0)
   const totalFactura = datos.valorConsulta + totalMedicamentos
+  const montoPagado = datos.valorConsulta + (datos.estadoPagoMedicamentos === 'pagado' ? totalMedicamentos : 0)
+  const saldoPendiente = Math.max(totalFactura - montoPagado, 0)
 
   doc.setFontSize(10)
   doc.setFont('helvetica', 'bold')
@@ -201,8 +200,11 @@ export function generarPDFConsulta(datos: DatosPDF): void {
     body: [
       ['Valor consulta:', `$ ${datos.valorConsulta.toLocaleString()} COP`],
       ['Total medicamentos:', `$ ${totalMedicamentos.toLocaleString()} COP`],
-      ['TOTAL A PAGAR:', `$ ${totalFactura.toLocaleString()} COP`],
-      ['Estado de pago:', datos.estadoPago === 'pagado' ? '✓ PAGADO' : '⏳ PENDIENTE'],
+      ['TOTAL FACTURADO:', `$ ${totalFactura.toLocaleString()} COP`],
+      ['Ingreso por consulta:', `$ ${datos.valorConsulta.toLocaleString()} COP`],
+      ['Medicamentos pagados:', `$ ${(datos.estadoPagoMedicamentos === 'pagado' ? totalMedicamentos : 0).toLocaleString()} COP`],
+      ['Saldo pendiente medicamentos:', `$ ${saldoPendiente.toLocaleString()} COP`],
+      ['Estado de medicamentos:', datos.estadoPagoMedicamentos === 'pagado' ? '✓ PAGADOS' : '⏳ PENDIENTES'],
     ],
     margin: { left: margen + anchoUtil * 0.4 },
     tableWidth: anchoUtil * 0.6,

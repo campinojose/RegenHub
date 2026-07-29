@@ -1,18 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import type { PerfilUsuario } from '@/lib/perfil'
+import type { Consulta, Doctor, Paciente, PerfilUsuario } from '@/lib/types'
 
 export default function AsistenteDashboard() {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [perfil, setPerfil] = useState<PerfilUsuario | null>(null)
-  const [doctorFavorito, setDoctorFavorito] = useState<any>(null)
-  const [pacientes, setPacientes] = useState<any[]>([])
-  const [ultimasConsultas, setUltimasConsultas] = useState<Record<string, any>>({})
+  const [doctorFavorito, setDoctorFavorito] = useState<Doctor | null>(null)
+  const [pacientes, setPacientes] = useState<Paciente[]>([])
+  const [ultimasConsultas, setUltimasConsultas] = useState<Record<string, Consulta>>({})
   const [busqueda, setBusqueda] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -32,7 +32,7 @@ export default function AsistenteDashboard() {
         router.push('/dashboard')
         return
       }
-      setPerfil(perfilData)
+      setPerfil(perfilData as PerfilUsuario)
 
       // Obtener doctor favorito
       if (perfilData.id_doctor_favorito) {
@@ -41,7 +41,7 @@ export default function AsistenteDashboard() {
           .select('*')
           .eq('id', perfilData.id_doctor_favorito)
           .single()
-        setDoctorFavorito(doc)
+        setDoctorFavorito(doc as Doctor | null)
       }
 
       // Cargar todos los pacientes
@@ -49,7 +49,7 @@ export default function AsistenteDashboard() {
         .from('pacientes')
         .select('*')
         .order('created_at', { ascending: false })
-      setPacientes(pacs || [])
+      setPacientes((pacs || []) as Paciente[])
 
       // Cargar la última consulta de cada paciente
       if (pacs && pacs.length > 0) {
@@ -65,10 +65,10 @@ export default function AsistenteDashboard() {
           .order('created_at', { ascending: false })
 
         if (consultas) {
-          const mapaUltima: Record<string, any> = {}
+          const mapaUltima: Record<string, Consulta> = {}
           for (const c of consultas) {
             if (!mapaUltima[c.id_paciente]) {
-              mapaUltima[c.id_paciente] = c
+            mapaUltima[c.id_paciente] = c as unknown as Consulta
             }
           }
           setUltimasConsultas(mapaUltima)
@@ -78,7 +78,7 @@ export default function AsistenteDashboard() {
       setLoading(false)
     }
     inicializar()
-  }, [])
+  }, [router, supabase])
 
   const pacientesFiltrados = pacientes.filter(p =>
     p.nombre_completo?.toLowerCase().includes(busqueda.toLowerCase()) ||

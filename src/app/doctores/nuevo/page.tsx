@@ -9,9 +9,6 @@ export default function CrearDoctorPage() {
   const supabase = createClient()
 
   const [nombre, setNombre] = useState('')
-  const [especialidad, setEspecialidad] = useState('')
-  const [registroMedico, setRegistroMedico] = useState('')
-  const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleGuardarDoctor = async (e: React.FormEvent) => {
@@ -21,9 +18,6 @@ export default function CrearDoctorPage() {
     const { error } = await supabase.from('doctores').insert([
       {
         nombre_completo: nombre,
-        especialidad: especialidad || null,
-        registro_medico: registroMedico,
-        email: email || null,
       }
     ])
 
@@ -53,40 +47,6 @@ export default function CrearDoctorPage() {
               placeholder="Ej: Dr. Jose David"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
-              className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Registro Médico / Licencia *</label>
-            <input
-              type="text"
-              required
-              placeholder="Ej: RM-123456"
-              value={registroMedico}
-              onChange={(e) => setRegistroMedico(e.target.value)}
-              className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Especialidad</label>
-            <input
-              type="text"
-              placeholder="Ej: Medicina Regenerativa"
-              value={especialidad}
-              onChange={(e) => setEspecialidad(e.target.value)}
-              className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico (Opcional)</label>
-            <input
-              type="email"
-              placeholder="doctor@clinica.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

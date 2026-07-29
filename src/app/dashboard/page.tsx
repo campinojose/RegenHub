@@ -3,7 +3,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import type { Paciente } from '@/lib/types'
+import type { Doctor, Paciente } from '@/lib/types'
+
+const DOCTORES_FIJOS: Doctor[] = [
+    { id: 'a142aea4-d90f-469f-9ff2-d56d057676cb', nombre_completo: 'Clemente Herrera' },
+    { id: 'a5f41fcf-5950-4b29-aad1-ded22f57ccf2', nombre_completo: 'Andrés Herrera' },
+    { id: 'c2cde56e-7fae-4ac4-b352-f3506c78137d', nombre_completo: 'Rosa Castaño' },
+    { id: 'f8c7116d-1c8b-4d2f-927c-0d48296f2dfd', nombre_completo: 'Carolina Herrera' },
+]
 
 function crearRutaDocumento(file: File) {
     const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
@@ -15,6 +22,7 @@ export default function DashboardPage() {
     const supabase = useMemo(() => createClient(), [])
 
     const [usuario, setUsuario] = useState<{ email?: string | null } | null>(null)
+    const [doctores, setDoctores] = useState<Doctor[]>(DOCTORES_FIJOS)
     const [pacientes, setPacientes] = useState<Paciente[]>([])
     const [busqueda, setBusqueda] = useState('')
     const [loading, setLoading] = useState(true)
@@ -36,11 +44,13 @@ export default function DashboardPage() {
     const [created_at, setcreated_at] = useState(obtenerFechaHoy())
     const [edad, setEdad] = useState('')
     const [sexo, setSexo] = useState('Masculino')
+    const [doctorElegidoId, setDoctorElegidoId] = useState('')
     const [direccion, setDireccion] = useState('')
     const [barrio, setBarrio] = useState('')
     const [telefono, setTelefono] = useState('')
     const [email, setEmail] = useState('')
     const [guardandoPaciente, setGuardandoPaciente] = useState(false)
+    const [eliminandoPacienteId, setEliminandoPacienteId] = useState<string | null>(null)
 
     const cargarPacientes = useCallback(async () => {
         const { data, error } = await supabase
@@ -55,6 +65,24 @@ export default function DashboardPage() {
         setPacientes((data || []) as Paciente[])
     }, [supabase])
 
+    const cargarDoctores = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('doctores')
+            .select('id, nombre_completo')
+            .in('id', DOCTORES_FIJOS.map((doctor) => doctor.id))
+            .order('nombre_completo', { ascending: true })
+
+        if (error) {
+            console.error('Error al cargar doctores:', error)
+            return
+        }
+
+        const doctoresPorId = new Map((data || []).map((doctor) => [doctor.id, doctor] as const))
+        const lista = DOCTORES_FIJOS.map((doctor) => (doctoresPorId.get(doctor.id) || doctor) as Doctor)
+        setDoctores(lista)
+        setDoctorElegidoId((actual) => actual || lista[0]?.id || '')
+    }, [supabase])
+
     useEffect(() => {
         async function inicializar() {
             setLoading(true)
@@ -66,6 +94,7 @@ export default function DashboardPage() {
             }
             setUsuario(user)
 
+            await cargarDoctores()
             await cargarPacientes()
             setLoading(false)
         }
@@ -75,6 +104,18 @@ export default function DashboardPage() {
 
     const handleRegistrarPaciente = async (e: React.FormEvent) => {
         e.preventDefault()
+
+        const nombreLimpio = nombre.trim()
+        if (nombreLimpio.length < 3) {
+            alert('El nombre completo debe tener al menos 3 caracteres.')
+            return
+        }
+
+        const edadNumerica = Number(edad)
+        if (!Number.isInteger(edadNumerica) || edadNumerica < 1 || edadNumerica > 105) {
+            alert('La edad debe ser un número entero entre 1 y 105 años.')
+            return
+        }
         setGuardandoPaciente(true)
 
         let urlFoto = null
@@ -100,20 +141,21 @@ export default function DashboardPage() {
         }
 
         // 2. Insertar paciente con la información completa
-        const { error } = await supabase.from('pacientes').insert([
+        const { data, error } = await supabase.from('pacientes').insert([
             {
-                nombre_completo: nombre,
+                nombre_completo: nombreLimpio,
                 documento_identidad: documento || null,
                 foto_cedula_frente: urlFoto,
                 fecha_registro: created_at || null,
-                edad: edad ? parseInt(edad) : null,
+                id_doctor_elegido: doctorElegidoId || null,
+                edad: edadNumerica,
                 sexo: sexo,
                 direccion: direccion || null,
                 barrio: barrio || null,
                 telefono: telefono || null,
                 email: email || null,
             }
-        ])
+        ]).select('id').single()
 
         if (error) {
             alert('Error al registrar paciente: ' + error.message)
@@ -121,7 +163,12 @@ export default function DashboardPage() {
             alert('Paciente registrado con éxito')
             limpiarFormulario()
             setModalAbierto(false)
-            cargarPacientes()
+            const pacienteId = typeof data?.id === 'string' ? data.id.trim() : ''
+            if (pacienteId) {
+                router.push(`/pacientes/${encodeURIComponent(pacienteId)}`)
+            } else {
+                cargarPacientes()
+            }
         }
         setGuardandoPaciente(false)
     }
@@ -133,6 +180,7 @@ export default function DashboardPage() {
         setcreated_at(obtenerFechaHoy())
         setEdad('')
         setSexo('Masculino')
+        setDoctorElegidoId((actual) => actual || doctores[0]?.id || DOCTORES_FIJOS[0]?.id || '')
         setDireccion('')
         setBarrio('')
         setTelefono('')
@@ -147,6 +195,32 @@ export default function DashboardPage() {
     const handleCerrarSesion = async () => {
         await supabase.auth.signOut()
         router.push('/login')
+    }
+
+    const handleEliminarPaciente = async (paciente: Paciente) => {
+        const confirmado = window.confirm(
+            `Eliminar a ${paciente.nombre_completo}? Esta acción eliminará también sus consultas y no se puede deshacer.`
+        )
+        if (!confirmado) return
+
+        setEliminandoPacienteId(paciente.id)
+        const { error } = await supabase.from('pacientes').delete().eq('id', paciente.id)
+
+        if (error) {
+            alert(`No se pudo eliminar el paciente: ${error.message}`)
+            setEliminandoPacienteId(null)
+            return
+        }
+
+        if (paciente.foto_cedula_frente) {
+            const { error: storageError } = await supabase.storage
+                .from('cedulas-pacientes')
+                .remove([paciente.foto_cedula_frente])
+            if (storageError) console.error('No se pudo eliminar la cédula:', storageError)
+        }
+
+        setPacientes((actuales) => actuales.filter((actual) => actual.id !== paciente.id))
+        setEliminandoPacienteId(null)
     }
 
     return (
@@ -199,7 +273,7 @@ export default function DashboardPage() {
                         placeholder="🔍 Buscar por nombre o cédula..."
                         value={busqueda}
                         onChange={(e) => setBusqueda(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-xl text-xs bg-slate-50 mb-4 outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border rounded-xl text-xs bg-slate-50 mb-4 outline-none focus:ring-2 focus:ring-blue-500 text-black"
                     />
 
                     <div className="flex-1 overflow-y-auto space-y-2 pr-1">
@@ -220,9 +294,23 @@ export default function DashboardPage() {
                                             C.C. {paciente.documento_identidad || 'S/N'} {paciente.telefono ? `| Tel: ${paciente.telefono}` : ''}
                                         </p>
                                     </div>
-                                    <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                                        {paciente.sexo || 'N/A'}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
+                                            {paciente.sexo || 'N/A'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={(evento) => {
+                                                evento.stopPropagation()
+                                                handleEliminarPaciente(paciente)
+                                            }}
+                                            disabled={eliminandoPacienteId === paciente.id}
+                                            className="text-[10px] font-bold text-red-600 hover:text-red-700 disabled:text-slate-400"
+                                            aria-label={`Eliminar a ${paciente.nombre_completo}`}
+                                        >
+                                            {eliminandoPacienteId === paciente.id ? 'Eliminando…' : 'Eliminar'}
+                                        </button>
+                                    </div>
                                 </div>
                             ))
                         )}
@@ -305,6 +393,10 @@ export default function DashboardPage() {
                                     <input
                                         type="number"
                                         placeholder="Años"
+                                        required
+                                        min="1"
+                                        max="105"
+                                        step="1"
                                         value={edad}
                                         onChange={(e) => setEdad(e.target.value)}
                                         className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
@@ -377,16 +469,22 @@ export default function DashboardPage() {
 
                             {/* Profesional elegido */}
                             <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Profeisonal Elegido</label>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Profesional Elegido *</label>
                                     <select
-                                        value={sexo}
-                                        onChange={(e) => setSexo(e.target.value)}
+                                        required
+                                        value={doctorElegidoId}
+                                        onChange={(e) => setDoctorElegidoId(e.target.value)}
                                         className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 text-black"
                                     >
-                                        <option value="Clemente">Clemente</option>
-                                        <option value="Rosa">Rosa</option>
-                                        <option value="Carolina">Carolina</option>
-                                        <option value="Andres">Andres</option>
+                                        {doctores.length === 0 ? (
+                                            <option value="">No hay doctores registrados</option>
+                                        ) : (
+                                            doctores.map((doctor) => (
+                                                <option key={doctor.id} value={doctor.id}>
+                                                    {doctor.nombre_completo}
+                                                </option>
+                                            ))
+                                        )}
                                     </select>
                                 </div>
 

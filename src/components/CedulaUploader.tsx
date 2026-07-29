@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
 
 interface Props {
@@ -52,7 +53,7 @@ export default function CedulaUploader({ label, onUploadComplete }: Props) {
       
       <div className="relative border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-4 text-center bg-slate-50 hover:bg-blue-50/30 transition cursor-pointer flex flex-col items-center justify-center min-h-[130px]">
         {preview ? (
-          <img src={preview} alt="Vista previa cédula" className="h-24 object-cover rounded-lg shadow-sm" />
+          <Image src={preview} alt="Vista previa de cédula" width={160} height={96} unoptimized className="h-24 w-auto object-cover rounded-lg shadow-sm" />
         ) : (
           <div className="flex flex-col items-center text-slate-500">
             <svg className="w-8 h-8 mb-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -5,13 +5,6 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  {
-    rules: {
-      // Supabase no genera tipos hasta aplicar la migración. Mientras tanto,
-      // se mantiene visible como advertencia sin bloquear la entrega.
-      '@typescript-eslint/no-explicit-any': 'warn',
-    },
-  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

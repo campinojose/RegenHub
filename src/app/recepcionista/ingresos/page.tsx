@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import type { Consulta } from '@/lib/types'
 
 type Periodo = 'hoy' | 'semana' | 'mes'
 
 export default function IngresosRecepcionistaPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
-  const [consultas, setConsultas] = useState<any[]>([])
+  const [consultas, setConsultas] = useState<Consulta[]>([])
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [loading, setLoading] = useState(true)
   const [perfilNombre, setPerfilNombre] = useState('')
@@ -49,7 +50,7 @@ export default function IngresosRecepcionistaPage() {
       const { data, error } = await supabase
         .from('consultas')
         .select(`
-          id, created_at, precio_consulta, total_factura, estado_pago, medicamentos,
+          *,
           doctores:id_doctor (nombre_completo),
           pacientes:id_paciente (nombre_completo, documento_identidad)
         `)
@@ -57,29 +58,51 @@ export default function IngresosRecepcionistaPage() {
         .order('created_at', { ascending: false })
 
       if (error) console.error('Error:', error)
-      setConsultas(data || [])
+      setConsultas((data || []) as unknown as Consulta[])
       setLoading(false)
     }
     cargarDatos()
-  }, [periodo])
+  }, [periodo, router, supabase])
 
-  const totalIngresos = consultas.reduce((acc, c) => acc + (c.total_factura || c.precio_consulta || 0), 0)
-  const totalPagado = consultas.filter(c => c.estado_pago === 'pagado').reduce((acc, c) => acc + (c.total_factura || c.precio_consulta || 0), 0)
-  const totalPendiente = totalIngresos - totalPagado
+  const obtenerEstadoPagoMedicamentos = (consulta: Consulta) => consulta.estado_pago_medicamentos ?? consulta.estado_pago ?? 'pendiente'
+  const obtenerMontoMedicamentos = (consulta: Consulta) => typeof consulta.monto_medicamentos === 'number'
+    ? consulta.monto_medicamentos
+    : Array.isArray(consulta.medicamentos)
+      ? consulta.medicamentos.reduce((acc, med) => acc + (Number(med.precio) || 0), 0)
+      : 0
+
+  const totalIngresos = consultas.reduce(
+    (acc, c) => acc + (c.precio_consulta || 50000) + (obtenerEstadoPagoMedicamentos(c) === 'pagado' ? obtenerMontoMedicamentos(c) : 0),
+    0,
+  )
+  const totalPagado = totalIngresos
+  const totalPendiente = consultas.reduce(
+    (acc, c) => acc + (obtenerEstadoPagoMedicamentos(c) === 'pendiente' ? obtenerMontoMedicamentos(c) : 0),
+    0,
+  )
+  const usaEstadoPagoMedicamentos = consultas.some((consulta) => Object.prototype.hasOwnProperty.call(consulta, 'estado_pago_medicamentos'))
 
   // Agrupar por doctor
-  const porDoctor = consultas.reduce((acc: Record<string, any>, c) => {
+  const porDoctor = consultas.reduce<Record<string, { total: number; count: number }>>((acc, c) => {
     const doctorNombre = c.doctores?.nombre_completo || 'Sin asignar'
     if (!acc[doctorNombre]) acc[doctorNombre] = { total: 0, count: 0 }
-    acc[doctorNombre].total += (c.total_factura || c.precio_consulta || 0)
+    acc[doctorNombre].total += (c.precio_consulta || 50000) + (obtenerEstadoPagoMedicamentos(c) === 'pagado' ? obtenerMontoMedicamentos(c) : 0)
     acc[doctorNombre].count += 1
     return acc
   }, {})
 
   const toggleEstadoPago = async (consultaId: string, estadoActual: string) => {
     const nuevoEstado = estadoActual === 'pagado' ? 'pendiente' : 'pagado'
-    await supabase.from('consultas').update({ estado_pago: nuevoEstado }).eq('id', consultaId)
-    setConsultas(prev => prev.map(c => c.id === consultaId ? { ...c, estado_pago: nuevoEstado } : c))
+    const actualizacion = usaEstadoPagoMedicamentos
+      ? { estado_pago_medicamentos: nuevoEstado, estado_pago: nuevoEstado }
+      : { estado_pago: nuevoEstado }
+
+    const { error } = await supabase.from('consultas').update(actualizacion).eq('id', consultaId)
+    if (error) {
+      alert(`No se pudo actualizar el pago: ${error.message}`)
+      return
+    }
+    setConsultas(prev => prev.map(c => c.id === consultaId ? { ...c, estado_pago_medicamentos: nuevoEstado } : c))
   }
 
   const labelPeriodo: Record<Periodo, string> = { hoy: 'Hoy', semana: 'Esta Semana', mes: 'Este Mes' }
@@ -135,7 +158,7 @@ export default function IngresosRecepcionistaPage() {
         {/* RESUMEN POR PROFESIONAL */}
         {Object.keys(porDoctor).length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {Object.entries(porDoctor).map(([nombre, data]: [string, any]) => (
+            {Object.entries(porDoctor).map(([nombre, data]) => (
               <div key={nombre} className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
                 <p className="text-[10px] font-bold text-blue-600 uppercase truncate">{nombre}</p>
                 <p className="text-lg font-bold text-slate-800 mt-1">${data.total.toLocaleString()}</p>
@@ -183,18 +206,23 @@ export default function IngresosRecepcionistaPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-slate-800">
-                        ${(c.total_factura || c.precio_consulta || 0).toLocaleString()} <span className="text-slate-400 font-normal">COP</span>
+                        ${((c.precio_consulta || 50000) + (obtenerEstadoPagoMedicamentos(c) === 'pagado' ? obtenerMontoMedicamentos(c) : 0)).toLocaleString()} <span className="text-slate-400 font-normal">COP</span>
+                        {obtenerMontoMedicamentos(c) ? (
+                          <span className="block text-[10px] font-semibold text-slate-400 mt-1">
+                            Medicamentos: ${Number(obtenerMontoMedicamentos(c)).toLocaleString()} {obtenerEstadoPagoMedicamentos(c) === 'pagado' ? 'pagados' : 'pendientes'}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
-                          onClick={() => toggleEstadoPago(c.id, c.estado_pago)}
+                          onClick={() => toggleEstadoPago(c.id, obtenerEstadoPagoMedicamentos(c))}
                           className={`px-3 py-1 rounded-full text-[10px] font-bold transition ${
-                            c.estado_pago === 'pagado'
+                            obtenerEstadoPagoMedicamentos(c) === 'pagado'
                               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                               : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                           }`}
                         >
-                          {c.estado_pago === 'pagado' ? '✓ Pagado' : '⏳ Pendiente'}
+                          {obtenerEstadoPagoMedicamentos(c) === 'pagado' ? '✓ Medicamentos pagados' : '⏳ Medicamentos pendientes'}
                         </button>
                       </td>
                     </tr>
