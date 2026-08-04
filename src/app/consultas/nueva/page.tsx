@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, Suspense } from 'react'
+import { useState, useEffect, useMemo, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { generarPDFConsulta } from '@/lib/generarPDF'
@@ -10,6 +10,7 @@ interface MedicamentoItem {
   nombre: string
   indicacion: string
   precio: number | string
+  pagado: boolean
 }
 
 const VALOR_CONSULTA_FIJO = 50000
@@ -25,7 +26,9 @@ function NuevaConsultaContent() {
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('')
   const [paciente, setPaciente] = useState<Paciente | null>(null)
   const [perfilAsistente, setPerfilAsistente] = useState<PerfilUsuario | null>(null)
-  
+  const [esPrimeraConsulta, setEsPrimeraConsulta] = useState<boolean>(true)
+  const [numeroConsulta, setNumeroConsulta] = useState<number>(1)
+
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(true)
   const [guardadoExitoso, setGuardadoExitoso] = useState(false)
@@ -36,12 +39,21 @@ function NuevaConsultaContent() {
   const [tallaCm, setTallaCm] = useState('')
   const [presionArterial, setPresionArterial] = useState('')
   const [tratamiento, setTratamiento] = useState('')
-  const [estadoPagoMedicamentos, setEstadoPagoMedicamentos] = useState<'pendiente' | 'pagado'>('pendiente')
 
-  // Facturación y Medicamentos
+  // Medicamentos con pago individual
   const [medicamentos, setMedicamentos] = useState<MedicamentoItem[]>([
-    { nombre: '', indicacion: '', precio: '' }
+    { nombre: '', indicacion: '', precio: '', pagado: false }
   ])
+
+  // Refs for auto-growing textareas
+  const motivoRef = useRef<HTMLTextAreaElement>(null)
+  const diagnosticoRef = useRef<HTMLTextAreaElement>(null)
+
+  const autoResize = (el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  }
 
   useEffect(() => {
     async function loadData() {
@@ -90,6 +102,18 @@ function NuevaConsultaContent() {
             pacienteCargado = pac as Paciente
             setPaciente(pacienteCargado)
           }
+
+          // 3. Contar consultas existentes para saber si es primera o no
+          const { count, error: errCount } = await supabase
+            .from('consultas')
+            .select('id', { count: 'exact', head: true })
+            .eq('id_paciente', pacienteId)
+
+          if (!errCount) {
+            const numConsultas = count ?? 0
+            setEsPrimeraConsulta(numConsultas === 0)
+            setNumeroConsulta(numConsultas + 1)
+          }
         }
 
         if (docs && docs.length > 0) {
@@ -114,7 +138,7 @@ function NuevaConsultaContent() {
   const handleAgregarMedicamento = () => {
     setMedicamentos([
       ...medicamentos,
-      { nombre: '', indicacion: '', precio: '' }
+      { nombre: '', indicacion: '', precio: '', pagado: false }
     ])
   }
 
@@ -132,7 +156,13 @@ function NuevaConsultaContent() {
 
   // Cálculos dinámicos
   const totalMedicamentos = medicamentos.reduce((acc, m) => acc + (Number(m.precio) || 0), 0)
+  const totalMedicamentosPagados = medicamentos.reduce((acc, m) => acc + (m.pagado ? (Number(m.precio) || 0) : 0), 0)
   const valorTotal = VALOR_CONSULTA_FIJO + totalMedicamentos
+
+  // Estado global calculado
+  const todosPagados = medicamentos.filter(m => m.nombre.trim() !== '' && Number(m.precio) > 0).every(m => m.pagado)
+  const algunoPagado = medicamentos.some(m => m.pagado && Number(m.precio) > 0)
+  const estadoPagoMedicamentosGlobal: 'pagado' | 'pendiente' = todosPagados && algunoPagado ? 'pagado' : 'pendiente'
 
   // Formato Fecha Actual (DD/MM/YYYY)
   const fechaHoy = new Date().toLocaleDateString('es-CO', {
@@ -158,7 +188,8 @@ function NuevaConsultaContent() {
         const nombrePad = m.nombre.padEnd(28, ' ')
         const precioFormatted = `$ ${Number(m.precio || 0).toLocaleString()} COP`
         const indicacionStr = `       Indicación: ${m.indicacion || 'Sin especificación'}`
-        return `${num} ${nombrePad} ${precioFormatted}\n${indicacionStr}`
+        const estadoStr = `       Estado: ${m.pagado ? '✓ Pagado' : '⏳ Pendiente'}`
+        return `${num} ${nombrePad} ${precioFormatted}\n${indicacionStr}\n${estadoStr}`
       }).join('\n')
     } else {
       lineasMedicamentos = '   (No se recetaron medicamentos)'
@@ -174,7 +205,7 @@ Fecha: ${fechaHoy}
 --------------------------------------------------
 1. Valor Consulta:                    $ ${valConsultaStr} COP
 --------------------------------------------------
-2. Medicamentos Recetados (${estadoPagoMedicamentos === 'pagado' ? 'Pagados' : 'Pendientes'}):
+2. Medicamentos Recetados:
 
 ${lineasMedicamentos}
 --------------------------------------------------
@@ -211,24 +242,26 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
       .map(m => ({
         nombre: m.nombre,
         indicacion: m.indicacion,
-        precio: Number(m.precio) || 0
+        precio: Number(m.precio) || 0,
+        pagado: m.pagado
       }))
 
     const totalMeds = medicamentosValidos.reduce((acc, m) => acc + m.precio, 0)
+    const totalMedsPagados = medicamentosValidos.reduce((acc, m) => acc + (m.pagado ? m.precio : 0), 0)
     const totalFactura = VALOR_CONSULTA_FIJO + totalMeds
 
     const { data: { user } } = await supabase.auth.getUser()
 
     const { error } = await supabase.rpc('crear_consulta', {
       estado_pago: 'pagado',
-      estado_pago_medicamentos: estadoPagoMedicamentos,
+      estado_pago_medicamentos: estadoPagoMedicamentosGlobal,
       id_asistente: user?.id || null,
       id_doctor: selectedDoctorId,
       id_paciente: paciente.id,
       imc,
       medicamentos: medicamentosValidos,
       motivo_consulta: motivoConsulta,
-      monto_medicamentos: totalMeds,
+      monto_medicamentos: totalMedsPagados,
       peso_kg: pesoKg ? Number(pesoKg) : null,
       precio_consulta: VALOR_CONSULTA_FIJO,
       presion_arterial: presionArterial || null,
@@ -262,7 +295,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
         diagnostico: tratamiento,
         valorConsulta: VALOR_CONSULTA_FIJO,
         medicamentos: medicamentosValidos,
-        estadoPagoMedicamentos,
+        estadoPagoMedicamentos: estadoPagoMedicamentosGlobal,
         montoMedicamentos: totalMeds,
       })
       setGuardadoExitoso(true)
@@ -305,6 +338,11 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
               <p className="text-blue-100 text-sm mt-1">
                 Paciente: <span className="font-bold underline">{paciente?.nombre_completo || 'No asignado'}</span> {paciente?.documento_identidad ? `(CC: ${paciente.documento_identidad})` : ''}
               </p>
+              {paciente && (
+                <span className="inline-flex items-center mt-2 px-3 py-1 rounded-full text-xs font-bold bg-blue-700/60 border border-blue-400/40">
+                  📋 Consulta N° {numeroConsulta} {esPrimeraConsulta ? '— Primera visita' : '— Visita de seguimiento'}
+                </span>
+              )}
             </div>
 
             {/* SELECCIONADOR DE DOCTOR */}
@@ -352,45 +390,70 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                 </select>
               </div>
 
-              {/* MOTIVO DE CONSULTA */}
+              {/* MOTIVO DE CONSULTA — auto-expansivo */}
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-1">Motivo de Consulta *</label>
                 <textarea
+                  ref={motivoRef}
                   required
-                  rows={3}
+                  rows={2}
                   value={motivoConsulta}
-                  onChange={(e) => setMotivoConsulta(e.target.value)}
+                  onChange={(e) => {
+                    setMotivoConsulta(e.target.value)
+                    autoResize(motivoRef.current)
+                  }}
+                  onInput={() => autoResize(motivoRef.current)}
                   placeholder="Motivo principal de la cita..."
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black resize-none overflow-hidden transition-all"
+                  style={{ minHeight: '70px' }}
                 />
               </div>
 
-              {/* SIGNOS VITALES */}
+              {/* SIGNOS VITALES — condicional según número de consulta */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <h2 className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-3">Signos Vitales</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Peso (kg)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="70"
-                      value={pesoKg}
-                      onChange={(e) => setPesoKg(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
-                    />
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-bold text-blue-700 uppercase tracking-wider">Signos Vitales</h2>
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${esPrimeraConsulta ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {esPrimeraConsulta ? '✦ Primera consulta — completo' : `↩ Seguimiento — solo P. Arterial`}
+                  </span>
+                </div>
+
+                {esPrimeraConsulta ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Peso (kg)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="70"
+                        value={pesoKg}
+                        onChange={(e) => setPesoKg(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Talla (cm)</label>
+                      <input
+                        type="number"
+                        placeholder="170"
+                        value={tallaCm}
+                        onChange={(e) => setTallaCm(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">P. Arterial</label>
+                      <input
+                        type="text"
+                        placeholder="120/80"
+                        value={presionArterial}
+                        onChange={(e) => setPresionArterial(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Talla (cm)</label>
-                    <input
-                      type="number"
-                      placeholder="170"
-                      value={tallaCm}
-                      onChange={(e) => setTallaCm(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
-                    />
-                  </div>
-                  <div>
+                ) : (
+                  <div className="max-w-xs">
                     <label className="block text-xs font-medium text-slate-600 mb-1">P. Arterial</label>
                     <input
                       type="text"
@@ -400,28 +463,46 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                       className="w-full px-3 py-2 border rounded-lg text-sm bg-white text-black"
                     />
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* TRATAMIENTO / OBSERVACIONES */}
+              {/* DIAGNÓSTICO — auto-expansivo */}
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-1">Diagnóstico</label>
                 <textarea
+                  ref={diagnosticoRef}
                   rows={2}
                   value={tratamiento}
-                  onChange={(e) => setTratamiento(e.target.value)}
+                  onChange={(e) => {
+                    setTratamiento(e.target.value)
+                    autoResize(diagnosticoRef.current)
+                  }}
+                  onInput={() => autoResize(diagnosticoRef.current)}
                   placeholder="Detalles del diagnóstico..."
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black resize-none overflow-hidden transition-all"
+                  style={{ minHeight: '70px' }}
                 />
               </div>
 
-              {/* SECCIÓN DE FACTURACIÓN Y MEDICAMENTOS */}
+              {/* SECCIÓN DE RECETA MÉDICA Y MEDICAMENTOS */}
               <div className="border-t border-slate-200 pt-6 space-y-4">
-                <h2 className="text-base font-bold text-slate-800">Facturación y Receta Médica</h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-slate-800">Receta Médica</h2>
+                  {medicamentos.some(m => m.nombre.trim() !== '') && (
+                    <div className="text-xs font-semibold text-slate-500">
+                      Total: <span className="text-slate-800 font-bold">${totalMedicamentos.toLocaleString()}</span>
+                      {' · '}
+                      Pagado: <span className="text-emerald-700 font-bold">${totalMedicamentosPagados.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
 
-                {/* 1. Valor Consulta */}
+                {/* Valor Consulta — visible internamente */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-blue-50/50 p-4 rounded-xl border border-blue-200 gap-3">
-                  <span className="text-sm font-bold text-slate-700">1. Valor Consulta (COP):</span>
+                  <div>
+                    <span className="text-sm font-bold text-slate-700">Valor Consulta (COP)</span>
+                    <p className="text-xs text-slate-500 mt-0.5">Visible solo internamente — no aparece en el PDF del paciente</p>
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-500">$</span>
                     <div className="w-40 px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm bg-slate-100 text-center">
@@ -430,9 +511,9 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                   </div>
                 </div>
 
-                {/* 2. Medicamentos Recetados */}
+                {/* Medicamentos con pago individual */}
                 <div className="space-y-4 pt-2">
-                  <label className="block text-sm font-bold text-slate-700">2. Medicamentos Recetados:</label>
+                  <label className="block text-sm font-bold text-slate-700">Medicamentos Recetados:</label>
 
                   {medicamentos.map((med, index) => (
                     <div key={index} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 relative">
@@ -449,7 +530,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                       <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                         <div className="sm:col-span-8">
                           <label className="block text-xs font-semibold text-slate-600 mb-1">
-                            Ingresar Medicamento {index + 1}:
+                            Medicamento {index + 1}:
                           </label>
                           <input
                             type="text"
@@ -462,7 +543,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
 
                         <div className="sm:col-span-4">
                           <label className="block text-xs font-semibold text-slate-600 mb-1">
-                            Ingresar Valor Medicamento {index + 1} ($ COP):
+                            Valor ($ COP):
                           </label>
                           <input
                             type="number"
@@ -486,6 +567,30 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-black"
                         />
                       </div>
+
+                      {/* ESTADO DE PAGO INDIVIDUAL */}
+                      <div className="flex items-center gap-3 pt-1">
+                        <span className="text-xs font-semibold text-slate-500">Estado de pago:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateMedicamento(index, 'pagado', true)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${med.pagado ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-emerald-400 hover:text-emerald-600'}`}
+                        >
+                          ✓ Pagado
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateMedicamento(index, 'pagado', false)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${!med.pagado ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-amber-400 hover:text-amber-600'}`}
+                        >
+                          ⏳ Pendiente
+                        </button>
+                        {Number(med.precio) > 0 && (
+                          <span className={`text-xs font-bold ml-auto ${med.pagado ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            ${Number(med.precio).toLocaleString()} COP
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
 
@@ -498,32 +603,6 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                     + Agregar otro medicamento
                   </button>
                 </div>
-
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800">Estado de Pago de Medicamentos</h3>
-                    <p className="text-xs text-slate-500">La consulta siempre queda pagada. Aquí solo controlas si los medicamentos quedaron pendientes o ya fueron cancelados.</p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setEstadoPagoMedicamentos('pagado')}
-                      className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pagado' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'}`}
-                    >
-                      Medicamentos pagados
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEstadoPagoMedicamentos('pendiente')}
-                      className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pendiente' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-700 border-slate-300 hover:border-amber-400'}`}
-                    >
-                      Medicamentos pendientes
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    PDF: la consulta se mostrará como ingreso fijo de $50.000 y los medicamentos reflejarán si están pagados o pendientes.
-                  </p>
-                </div>
               </div>
 
               {/* BOTÓN GUARDAR Y VER VISTA PREVIA */}
@@ -532,7 +611,7 @@ VALOR TOTAL A PAGAR:                $ ${totalStr} COP
                 disabled={loading || !paciente || !selectedDoctorId}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-3.5 rounded-xl shadow-lg transition text-base"
               >
-                {loading ? 'Guardando...' : 'Guardar Consulta y Generar Resumen'}
+                {loading ? 'Guardando...' : 'Guardar Consulta y Generar PDF'}
               </button>
             </form>
           ) : (

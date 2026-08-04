@@ -224,31 +224,6 @@ export default function DashboardPage() {
         router.push('/login')
     }
 
-    const handleEliminarPaciente = async (paciente: Paciente) => {
-        const confirmado = window.confirm(
-            `Eliminar a ${paciente.nombre_completo}? Esta acción eliminará también sus consultas y no se puede deshacer.`
-        )
-        if (!confirmado) return
-
-        setEliminandoPacienteId(paciente.id)
-        const { error } = await supabase.from('pacientes').delete().eq('id', paciente.id)
-
-        if (error) {
-            alert(`No se pudo eliminar el paciente: ${error.message}`)
-            setEliminandoPacienteId(null)
-            return
-        }
-
-        if (paciente.foto_cedula_frente) {
-            const { error: storageError } = await supabase.storage
-                .from('cedulas-pacientes')
-                .remove([paciente.foto_cedula_frente])
-            if (storageError) console.error('No se pudo eliminar la cédula:', storageError)
-        }
-
-        setPacientes((actuales) => actuales.filter((actual) => actual.id !== paciente.id))
-        setEliminandoPacienteId(null)
-    }
 
     return (
         <div className="min-h-screen bg-surface-50 flex flex-col">
@@ -338,18 +313,6 @@ export default function DashboardPage() {
                                         <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md uppercase tracking-wider">
                                             {paciente.sexo || 'N/A'}
                                         </span>
-                                        <button
-                                            type="button"
-                                            onClick={(evento) => {
-                                                evento.stopPropagation()
-                                                handleEliminarPaciente(paciente)
-                                            }}
-                                            disabled={eliminandoPacienteId === paciente.id}
-                                            className="text-[10px] font-bold text-slate-400 hover:text-red-600 disabled:text-slate-300 transition-colors"
-                                            aria-label={`Eliminar a ${paciente.nombre_completo}`}
-                                        >
-                                            {eliminandoPacienteId === paciente.id ? 'Borrando…' : 'Eliminar'}
-                                        </button>
                                     </div>
                                 </div>
                             ))

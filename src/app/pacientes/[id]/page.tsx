@@ -5,12 +5,33 @@ import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { Consulta, Doctor, Paciente } from '@/lib/types'
 
+// Mapa de nombre→id para los doctores registrados
 const DOCTORES_FIJOS = new Map([
   ['a142aea4-d90f-469f-9ff2-d56d057676cb', 'Clemente Herrera'],
   ['a5f41fcf-5950-4b29-aad1-ded22f57ccf2', 'Andrés Herrera'],
   ['c2cde56e-7fae-4ac4-b352-f3506c78137d', 'Rosa Castaño'],
   ['f8c7116d-1c8b-4d2f-927c-0d48296f2dfd', 'Carolina Herrera'],
 ])
+
+// Lista de doctors para detectar a cuál pertenece el usuario logueado
+const DOCTORES_LISTA = [
+  { id: 'a142aea4-d90f-469f-9ff2-d56d057676cb', nombre: 'Clemente Herrera' },
+  { id: 'a5f41fcf-5950-4b29-aad1-ded22f57ccf2', nombre: 'Andrés Herrera' },
+  { id: 'c2cde56e-7fae-4ac4-b352-f3506c78137d', nombre: 'Rosa Castaño' },
+  { id: 'f8c7116d-1c8b-4d2f-927c-0d48296f2dfd', nombre: 'Carolina Herrera' },
+]
+
+/**
+ * Dado el nombre completo del perfil logueado,
+ * devuelve el id del doctor que le corresponde (o null si es admin/herrerajoshelin).
+ */
+function obtenerDoctorIdDelPerfil(nombrePerfil: string): string | null {
+  const lower = nombrePerfil.toLowerCase()
+  const match = DOCTORES_LISTA.find(d =>
+    lower.includes(d.nombre.split(' ')[0].toLowerCase())
+  )
+  return match?.id ?? null
+}
 
 export default function DetallePacientePage() {
   const params = useParams()
@@ -25,6 +46,9 @@ export default function DetallePacientePage() {
   const [zoomCedula, setZoomCedula] = useState(1)
   const [consultas, setConsultas] = useState<Consulta[]>([])
   const [loading, setLoading] = useState(true)
+  const [eliminando, setEliminando] = useState(false)
+  // null = admin (puede eliminar todos), string = id del doctor al que pertenece el usuario
+  const [doctorIdUsuario, setDoctorIdUsuario] = useState<string | null | undefined>(undefined)
 
   useEffect(() => {
   async function cargarDatosPaciente() {
@@ -32,6 +56,20 @@ export default function DetallePacientePage() {
     setLoading(true)
 
     try {
+      // ── Identificar al usuario logueado y su doctor asociado ──
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: perfil } = await supabase
+          .from('perfiles_usuario')
+          .select('nombre_completo')
+          .eq('id', user.id)
+          .maybeSingle()
+        const docId = perfil?.nombre_completo
+          ? obtenerDoctorIdDelPerfil(perfil.nombre_completo)
+          : null
+        setDoctorIdUsuario(docId) // null = admin, string = doctor propio
+      }
+
       // 1. Cargar datos del paciente
       const { data: dataPaciente, error: errorPaciente } = await supabase
         .from('pacientes')
@@ -116,6 +154,50 @@ export default function DetallePacientePage() {
 
   const doctorVisible = doctorElegido?.nombre_completo || (paciente?.id_doctor_elegido ? DOCTORES_FIJOS.get(paciente.id_doctor_elegido) : null)
 
+  /**
+   * Regla de eliminación:
+   * - Si doctorIdUsuario === null  → es admin (herrerajoshelin) → puede eliminar cualquier paciente
+   * - Si doctorIdUsuario es un string → es un doctor → solo puede eliminar si el paciente le pertenece
+   * - undefined = todavía cargando el perfil
+   */
+  const puedeEliminar: boolean =
+    doctorIdUsuario === null ||
+    (typeof doctorIdUsuario === 'string' && paciente?.id_doctor_elegido === doctorIdUsuario)
+
+  const handleEliminarPaciente = async () => {
+    if (!paciente) return
+    const confirmado = window.confirm(
+      `¿Eliminar a ${paciente.nombre_completo}?\n\nEsta acción eliminará también todas sus consultas y no se puede deshacer.`
+    )
+    if (!confirmado) return
+
+    setEliminando(true)
+
+    try {
+      const res = await fetch('/api/eliminar-paciente', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pacienteId: paciente.id }),
+      })
+
+      const result = await res.json()
+
+      if (!res.ok || result.error) {
+        alert('No se pudo eliminar el paciente: ' + (result.error || 'Error desconocido'))
+        setEliminando(false)
+        return
+      }
+
+      // Éxito — redirigir al dashboard
+      router.push('/dashboard')
+
+    } catch (err) {
+      console.error('Error al llamar la API de eliminación:', err)
+      alert('Ocurrió un error inesperado. Revisa la consola del navegador.')
+      setEliminando(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -153,12 +235,23 @@ export default function DetallePacientePage() {
             ← Volver al Dashboard
           </button>
 
-          <button
-            onClick={() => router.push(`/consultas/nueva?pacienteId=${paciente.id}`)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl shadow transition text-sm flex items-center gap-2"
-          >
-            + Nueva Consulta / Tratamiento
-          </button>
+          <div className="flex items-center gap-3">
+            {puedeEliminar && (
+              <button
+                onClick={handleEliminarPaciente}
+                disabled={eliminando}
+                className="bg-red-50 hover:bg-red-100 border border-red-300 text-red-600 hover:text-red-800 font-bold px-4 py-2.5 rounded-xl shadow-sm transition text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                🗑 {eliminando ? 'Eliminando...' : 'Eliminar Paciente'}
+              </button>
+            )}
+            <button
+              onClick={() => router.push(`/consultas/nueva?pacienteId=${paciente.id}`)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl shadow transition text-sm flex items-center gap-2"
+            >
+              + Nueva Consulta / Tratamiento
+            </button>
+          </div>
         </div>
 
         {/* TARJETA DE DATOS DEL PACIENTE */}

@@ -24,9 +24,9 @@ interface DatosPDF {
   motivoConsulta: string
   diagnostico: string
 
-  // Facturación
+  // Facturación (solo interno — no aparece en PDF)
   valorConsulta: number
-  medicamentos: { nombre: string; indicacion: string; precio: number }[]
+  medicamentos: { nombre: string; indicacion: string; precio: number; pagado?: boolean }[]
   estadoPagoMedicamentos: 'pendiente' | 'pagado'
   montoMedicamentos: number
 }
@@ -39,203 +39,157 @@ function obtenerFinTabla(doc: jsPDF): number {
 
 export function generarPDFConsulta(datos: DatosPDF): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+
+  const margen = 20
+  const anchoUtil = 210 - margen * 2
+  let y = 0
+
+  // ── ENCABEZADO ELEGANTE ──────────────────────────────────────────────────
+  // Fondo superior suave
+  doc.setFillColor(248, 250, 252) // slate-50
+  doc.rect(0, 0, 210, 45, 'F')
+  
+  // Acento de color (línea superior)
+  doc.setFillColor(37, 99, 235) // blue-600
+  doc.rect(0, 0, 210, 6, 'F')
+
+  y = 25
+  doc.setTextColor(30, 41, 59) // slate-800
+  doc.setFontSize(24)
+  doc.setFont('helvetica', 'bold')
+  doc.text('RECETA MÉDICA', margen, y)
+  
+  doc.setTextColor(100, 116, 139) // slate-500
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  
+  // Fecha actual formateada
   const ahora = new Date()
   const fechaStr = ahora.toLocaleDateString('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric'
+    day: '2-digit', month: 'long', year: 'numeric'
   })
-  const horaStr = ahora.toLocaleTimeString('es-CO', {
-    hour: '2-digit', minute: '2-digit'
-  })
+  doc.text(fechaStr, 210 - margen, y, { align: 'right' })
 
-  const margen = 15
-  const anchoUtil = 210 - margen * 2
-  let y = 20
+  y = 55
 
-  // ── ENCABEZADO ──────────────────────────────────────────────────────────
-  doc.setFillColor(37, 99, 235) // azul
-  doc.rect(0, 0, 210, 28, 'F')
-
-  doc.setTextColor(255, 255, 255)
-  doc.setFontSize(18)
-  doc.setFont('helvetica', 'bold')
-  doc.text('RegenHub — Medicina Regenerativa', margen, 13)
-
+  // ── INFORMACIÓN DEL PACIENTE ──────────────────────────────────────────────
+  doc.setFillColor(241, 245, 249) // slate-100
+  doc.roundedRect(margen, y, anchoUtil, 25, 3, 3, 'F')
+  
+  y += 8
+  doc.setTextColor(51, 65, 85) // slate-700
   doc.setFontSize(9)
+  doc.setFont('helvetica', 'bold')
+  doc.text('PACIENTE', margen + 5, y)
+  
+  y += 6
+  doc.setFontSize(11)
+  doc.setTextColor(15, 23, 42) // slate-900
+  doc.text(datos.pacienteNombre, margen + 5, y)
+  
   doc.setFont('helvetica', 'normal')
-  doc.text(`Fecha: ${fechaStr}   Hora: ${horaStr}`, margen, 21)
-  doc.text('HISTORIA CLÍNICA Y FACTURA DE ATENCIÓN', 210 - margen, 21, { align: 'right' })
-
-  y = 36
-  doc.setTextColor(30, 30, 30)
-
-  // ── DATOS DEL PACIENTE ─────────────────────────────────────────────────
   doc.setFontSize(10)
+  doc.setTextColor(71, 85, 105) // slate-600
+  doc.text(`ID: ${datos.pacienteCC}`, 210 - margen - 5, y, { align: 'right' })
+  
+  if (datos.pacienteEdad) {
+      y += 6
+      doc.setFontSize(9)
+      doc.text(`Edad: ${datos.pacienteEdad} años`, margen + 5, y)
+  }
+
+  y += 20
+
+  // ── MEDICAMENTOS ────────────────────────────────────────────────────────
+  const medFiltrados = datos.medicamentos.filter(m => m.nombre.trim() !== '')
+
+  doc.setTextColor(30, 41, 59)
+  doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
-  doc.setFillColor(241, 245, 249)
-  doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-  doc.text('DATOS DEL PACIENTE', margen + 2, y)
-  y += 6
+  doc.text('TRATAMIENTO', margen, y)
+  y += 5
 
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-
-  const col1x = margen
-  const col2x = margen + anchoUtil / 2
-
-  doc.text(`Nombre: ${datos.pacienteNombre}`, col1x, y)
-  doc.text(`CC: ${datos.pacienteCC}`, col2x, y); y += 5
-  doc.text(`Edad: ${datos.pacienteEdad ?? 'N/A'} años`, col1x, y)
-  doc.text(`Sexo: ${datos.pacienteSexo ?? 'N/A'}`, col2x, y); y += 5
-  doc.text(`Dirección: ${datos.pacienteDireccion ?? 'N/A'}`, col1x, y)
-  doc.text(`Teléfono: ${datos.pacienteTelefono ?? 'N/A'}`, col2x, y); y += 8
-
-  // ── PROFESIONAL Y ASISTENTE ────────────────────────────────────────────
-  doc.setFont('helvetica', 'bold')
-  doc.setFillColor(241, 245, 249)
-  doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-  doc.text('PROFESIONAL Y ASISTENTE', margen + 2, y)
-  y += 6
-
-  doc.setFont('helvetica', 'normal')
-  doc.text(`Profesional que atendió: ${datos.doctorNombre}`, col1x, y)
-  doc.text(`Registrado por: ${datos.asistenteNombre}`, col2x, y); y += 8
-
-  // ── SIGNOS VITALES ────────────────────────────────────────────────────
-  const tieneSignos = datos.pesoKg || datos.tallaCm || datos.presionArterial
-  if (tieneSignos) {
-    doc.setFont('helvetica', 'bold')
-    doc.setFillColor(241, 245, 249)
-    doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-    doc.text('SIGNOS VITALES', margen + 2, y)
-    y += 6
-
-    doc.setFont('helvetica', 'normal')
-    const signosData = [
-      ['Peso', datos.pesoKg ? `${datos.pesoKg} kg` : '-'],
-      ['Talla', datos.tallaCm ? `${datos.tallaCm} cm` : '-'],
-      ['IMC', datos.imc ? String(datos.imc) : '-'],
-      ['Presión Arterial', datos.presionArterial || '-'],
-    ]
+  if (medFiltrados.length === 0) {
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'italic')
+    doc.setTextColor(148, 163, 184) // slate-400
+    doc.text('No se recetaron medicamentos en esta consulta.', margen, y + 5)
+    y += 15
+  } else {
+    const medRows = medFiltrados.map((m, i) => [
+      { content: `${i + 1}`, styles: { halign: 'center', fontStyle: 'bold', textColor: [37, 99, 235] } },
+      { content: m.nombre, styles: { fontStyle: 'bold' } },
+      m.indicacion || 'Sin indicaciones especiales',
+    ])
 
     autoTable(doc, {
       startY: y,
-      head: [['Parámetro', 'Valor']],
-      body: signosData,
-      margin: { left: margen },
+      head: [['#', 'Medicamento', 'Posología / Indicaciones']],
+      body: medRows,
+      margin: { left: margen, right: margen },
       tableWidth: anchoUtil,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 }, 1: { cellWidth: 'auto' } }
-    })
-    y = obtenerFinTabla(doc) + 6
-  }
-
-  // ── DIAGNÓSTICO ───────────────────────────────────────────────────────
-  doc.setFont('helvetica', 'bold')
-  doc.setFillColor(241, 245, 249)
-  doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-  doc.text('MOTIVO Y DIAGNÓSTICO', margen + 2, y)
-  y += 6
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-
-  const motivoLineas = doc.splitTextToSize(`Motivo: ${datos.motivoConsulta}`, anchoUtil)
-  doc.text(motivoLineas, margen, y)
-  y += motivoLineas.length * 4 + 2
-
-  if (datos.diagnostico) {
-    const diagLineas = doc.splitTextToSize(`Diagnóstico: ${datos.diagnostico}`, anchoUtil)
-    doc.text(diagLineas, margen, y)
-    y += diagLineas.length * 4 + 4
-  } else {
-    y += 4
-  }
-
-  // ── MEDICAMENTOS ──────────────────────────────────────────────────────
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
-  doc.setFillColor(241, 245, 249)
-  doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-  doc.text('RECETA MÉDICA Y MEDICAMENTOS', margen + 2, y)
-  y += 4
-
-  const medRows = datos.medicamentos.length > 0
-    ? datos.medicamentos.map((m, i) => [
-        `${i + 1}. ${m.nombre}`,
-        m.indicacion || 'Sin indicación',
-        `$ ${m.precio.toLocaleString()} COP`
-      ])
-    : [['Sin medicamentos recetados', '', '']]
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Medicamento', 'Indicación', 'Precio']],
-    body: medRows,
-    margin: { left: margen },
-    tableWidth: anchoUtil,
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    columnStyles: { 0: { cellWidth: 60 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 35, halign: 'right' } }
-  })
-  y = obtenerFinTabla(doc) + 6
-
-  // ── FACTURA ───────────────────────────────────────────────────────────
-  const totalMedicamentos = datos.montoMedicamentos || datos.medicamentos.reduce((acc, m) => acc + m.precio, 0)
-  const totalFactura = datos.valorConsulta + totalMedicamentos
-  const montoPagado = datos.valorConsulta + (datos.estadoPagoMedicamentos === 'pagado' ? totalMedicamentos : 0)
-  const saldoPendiente = Math.max(totalFactura - montoPagado, 0)
-
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'bold')
-  doc.setFillColor(241, 245, 249)
-  doc.rect(margen, y - 4, anchoUtil, 6, 'F')
-  doc.text('RESUMEN DE FACTURA', margen + 2, y)
-  y += 4
-
-  autoTable(doc, {
-    startY: y,
-    body: [
-      ['Valor consulta:', `$ ${datos.valorConsulta.toLocaleString()} COP`],
-      ['Total medicamentos:', `$ ${totalMedicamentos.toLocaleString()} COP`],
-      ['TOTAL FACTURADO:', `$ ${totalFactura.toLocaleString()} COP`],
-      ['Ingreso por consulta:', `$ ${datos.valorConsulta.toLocaleString()} COP`],
-      ['Medicamentos pagados:', `$ ${(datos.estadoPagoMedicamentos === 'pagado' ? totalMedicamentos : 0).toLocaleString()} COP`],
-      ['Saldo pendiente medicamentos:', `$ ${saldoPendiente.toLocaleString()} COP`],
-      ['Estado de medicamentos:', datos.estadoPagoMedicamentos === 'pagado' ? '✓ PAGADOS' : '⏳ PENDIENTES'],
-    ],
-    margin: { left: margen + anchoUtil * 0.4 },
-    tableWidth: anchoUtil * 0.6,
-    styles: { fontSize: 9, cellPadding: 2 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    bodyStyles: { lineColor: [203, 213, 225], lineWidth: 0.1 },
-    columnStyles: {
-      0: { fontStyle: 'bold', cellWidth: 55 },
-      1: { halign: 'right', cellWidth: 'auto' }
-    },
-    didParseCell: (data) => {
-      if (data.row.index === 2) {
-        data.cell.styles.fillColor = [37, 99, 235]
-        data.cell.styles.textColor = [255, 255, 255]
-        data.cell.styles.fontStyle = 'bold'
+      theme: 'plain',
+      styles: {
+        fontSize: 10,
+        cellPadding: { top: 6, bottom: 6, left: 4, right: 4 },
+        textColor: [51, 65, 85], // slate-700
+      },
+      headStyles: {
+        textColor: [100, 116, 139], // slate-500
+        fontStyle: 'bold',
+        fontSize: 9,
+        halign: 'left',
+        fillColor: [255,255,255],
+      },
+      bodyStyles: {
+        lineColor: [226, 232, 240], // slate-200
+        lineWidth: { bottom: 0.1 },
+      },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        1: { cellWidth: 60, textColor: [15, 23, 42] }, // slate-900
+        2: { cellWidth: 'auto' },
+      },
+      didParseCell: function (data) {
+          if (data.section === 'head') {
+              data.cell.styles.lineWidth = { bottom: 0.5 };
+              data.cell.styles.lineColor = [203, 213, 225]; // slate-300
+          }
       }
-    }
-  })
-  y = obtenerFinTabla(doc) + 12
+    })
 
-  // ── PIE DE PÁGINA ─────────────────────────────────────────────────────
-  doc.setDrawColor(203, 213, 225)
+    y = obtenerFinTabla(doc) + 25
+  }
+
+  // ── FIRMA ─────────────────────────────────────────────────────────────
+  // Si la tabla es muy larga y la firma queda muy abajo, pasamos a nueva página
+  if (y > 250) {
+      doc.addPage()
+      y = margen + 10
+  }
+
+  doc.setDrawColor(203, 213, 225) // slate-300
+  doc.setLineWidth(0.5)
   doc.line(margen, y, margen + 70, y)
-  y += 4
+  
+  y += 6
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(30, 41, 59)
+  doc.text(datos.doctorNombre, margen, y)
+  
+  y += 5
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
-  doc.setTextColor(100, 100, 100)
-  doc.text(`Firma: ${datos.doctorNombre}`, margen, y)
-  doc.text('Documento generado digitalmente por RegenHub', 210 - margen, y, { align: 'right' })
+  doc.setTextColor(148, 163, 184)
+  doc.text('Médico Tratante', margen, y)
 
-  // ── GUARDAR ───────────────────────────────────────────────────────────
-  const nombreArchivo = `consulta_${datos.pacienteCC}_${fechaStr.replace(/\//g, '-')}.pdf`
+  // ── GUARDAR ─────────────────────────────────────────────────────────────
+  const fechaDocStr = ahora.toLocaleDateString('es-CO', {
+    day: '2-digit', month: '2-digit', year: 'numeric'
+  }).replace(/\//g, '-')
+
+  const nombreArchivo = `receta_${datos.pacienteCC}_${fechaDocStr}.pdf`
   doc.save(nombreArchivo)
 }
+

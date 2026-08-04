@@ -9,6 +9,7 @@ interface MedicamentoItem {
   nombre: string
   indicacion: string
   precio: number | string
+  pagado: boolean
 }
 
 type ConsultaEditRow = {
@@ -18,7 +19,7 @@ type ConsultaEditRow = {
   created_at?: string | null
   motivo_consulta: string | null
   tratamiento_realizado: string | null
-  medicamentos: { nombre: string; indicacion: string; precio: number }[] | null
+  medicamentos: { nombre: string; indicacion: string; precio: number; pagado?: boolean }[] | null
   precio_consulta: number | null
   monto_medicamentos: number | null
   estado_pago_medicamentos: 'pendiente' | 'pagado' | null
@@ -43,8 +44,7 @@ export default function EditarConsultaPage() {
   const [doctor, setDoctor] = useState<Doctor | null>(null)
   const [motivoConsulta, setMotivoConsulta] = useState('')
   const [tratamiento, setTratamiento] = useState('')
-  const [estadoPagoMedicamentos, setEstadoPagoMedicamentos] = useState<'pendiente' | 'pagado'>('pendiente')
-  const [medicamentos, setMedicamentos] = useState<MedicamentoItem[]>([{ nombre: '', indicacion: '', precio: '' }])
+  const [medicamentos, setMedicamentos] = useState<MedicamentoItem[]>([{ nombre: '', indicacion: '', precio: '', pagado: false }])
   const [usaEstadoPagoMedicamentos, setUsaEstadoPagoMedicamentos] = useState(true)
 
   useEffect(() => {
@@ -85,15 +85,19 @@ export default function EditarConsultaPage() {
       setDoctor(doctorRelacionado as Doctor | null)
       setMotivoConsulta(consultaCargada.motivo_consulta || '')
       setTratamiento(consultaCargada.tratamiento_realizado || '')
-      setEstadoPagoMedicamentos(consultaCargada.estado_pago_medicamentos || consultaCargada.estado_pago || 'pendiente')
+      
+      const globalEstadoPago = consultaCargada.estado_pago_medicamentos || consultaCargada.estado_pago || 'pendiente'
+
       setMedicamentos(
         Array.isArray(consultaCargada.medicamentos) && consultaCargada.medicamentos.length > 0
           ? consultaCargada.medicamentos.map((med) => ({
               nombre: med.nombre,
               indicacion: med.indicacion,
               precio: med.precio,
+              // Si no tiene la propiedad 'pagado' (consultas antiguas), inferirlo del estado global de la consulta
+              pagado: med.pagado ?? (globalEstadoPago === 'pagado')
             }))
-          : [{ nombre: '', indicacion: '', precio: '' }]
+          : [{ nombre: '', indicacion: '', precio: '', pagado: false }]
       )
       setLoading(false)
     }
@@ -102,9 +106,16 @@ export default function EditarConsultaPage() {
   }, [consultaId, supabase])
 
   const totalMedicamentos = medicamentos.reduce((acc, med) => acc + (Number(med.precio) || 0), 0)
+  const totalMedicamentosPagados = medicamentos.reduce((acc, med) => acc + (med.pagado ? (Number(med.precio) || 0) : 0), 0)
   const totalFactura = VALOR_CONSULTA_FIJO + totalMedicamentos
 
-  const handleUpdateMedicamento = (index: number, field: keyof MedicamentoItem, value: string) => {
+  // Estado global calculado para guardarlo
+  const todosPagados = medicamentos.filter(m => m.nombre.trim() !== '' && Number(m.precio) > 0).every(m => m.pagado)
+  const algunoPagado = medicamentos.some(m => m.pagado && Number(m.precio) > 0)
+  const estadoPagoMedicamentosGlobal: 'pagado' | 'pendiente' = (todosPagados && algunoPagado) ? 'pagado' : 'pendiente'
+
+
+  const handleUpdateMedicamento = (index: number, field: keyof MedicamentoItem, value: any) => {
     setMedicamentos((actuales) => {
       const copia = [...actuales]
       copia[index] = { ...copia[index], [field]: value }
@@ -113,7 +124,7 @@ export default function EditarConsultaPage() {
   }
 
   const agregarMedicamento = () => {
-    setMedicamentos((actuales) => [...actuales, { nombre: '', indicacion: '', precio: '' }])
+    setMedicamentos((actuales) => [...actuales, { nombre: '', indicacion: '', precio: '', pagado: false }])
   }
 
   const eliminarMedicamento = (index: number) => {
@@ -131,9 +142,10 @@ export default function EditarConsultaPage() {
         nombre: med.nombre.trim(),
         indicacion: med.indicacion.trim(),
         precio: Number(med.precio) || 0,
+        pagado: med.pagado
       }))
 
-    const montoMedicamentos = medicamentosValidos.reduce((acc, med) => acc + med.precio, 0)
+    const montoMedicamentosPagados = medicamentosValidos.reduce((acc, med) => acc + (med.pagado ? med.precio : 0), 0)
 
     const { error } = await supabase
       .from('consultas')
@@ -142,10 +154,10 @@ export default function EditarConsultaPage() {
         tratamiento_realizado: tratamiento.trim(),
         medicamentos: medicamentosValidos,
         precio_consulta: VALOR_CONSULTA_FIJO,
-        monto_medicamentos: montoMedicamentos,
-        total_factura: VALOR_CONSULTA_FIJO + montoMedicamentos,
+        monto_medicamentos: montoMedicamentosPagados,
+        total_factura: VALOR_CONSULTA_FIJO + medicamentosValidos.reduce((acc, med) => acc + med.precio, 0),
         estado_pago: 'pagado',
-        ...(usaEstadoPagoMedicamentos ? { estado_pago_medicamentos: estadoPagoMedicamentos } : {}),
+        ...(usaEstadoPagoMedicamentos ? { estado_pago_medicamentos: estadoPagoMedicamentosGlobal } : {}),
       })
       .eq('id', consultaId)
 
@@ -228,28 +240,15 @@ export default function EditarConsultaPage() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-800">Medicamentos</h2>
-                  <p className="text-xs text-slate-500">La consulta sigue fija en $50.000. Aquí solo ajustas la receta y su pago.</p>
+                  <p className="text-xs text-slate-500">Ajusta la receta y el estado de pago individual de cada medicamento.</p>
                 </div>
-                <div className="text-right text-xs text-slate-500 font-semibold">
-                  Total medicamentos: $ {totalMedicamentos.toLocaleString()} COP
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setEstadoPagoMedicamentos('pagado')}
-                  className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pagado' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'}`}
-                >
-                  Medicamentos pagados
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEstadoPagoMedicamentos('pendiente')}
-                  className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${estadoPagoMedicamentos === 'pendiente' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-700 border-slate-300 hover:border-amber-400'}`}
-                >
-                  Medicamentos pendientes
-                </button>
+                {medicamentos.some(m => m.nombre.trim() !== '') && (
+                  <div className="text-right text-xs font-semibold text-slate-500">
+                    Total: <span className="text-slate-800 font-bold">${totalMedicamentos.toLocaleString()}</span>
+                    {' · '}
+                    Pagado: <span className="text-emerald-700 font-bold">${totalMedicamentosPagados.toLocaleString()}</span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4 pt-2">
@@ -293,6 +292,30 @@ export default function EditarConsultaPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-black"
                       />
                     </div>
+                    
+                    {/* ESTADO DE PAGO INDIVIDUAL */}
+                    <div className="flex items-center gap-3 pt-1">
+                      <span className="text-xs font-semibold text-slate-500">Estado de pago:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateMedicamento(index, 'pagado', true)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${medicamento.pagado ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-emerald-400 hover:text-emerald-600'}`}
+                      >
+                        ✓ Pagado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateMedicamento(index, 'pagado', false)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${!medicamento.pagado ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-amber-400 hover:text-amber-600'}`}
+                      >
+                        ⏳ Pendiente
+                      </button>
+                      {Number(medicamento.precio) > 0 && (
+                        <span className={`text-xs font-bold ml-auto ${medicamento.pagado ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          ${Number(medicamento.precio).toLocaleString()} COP
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
 
@@ -309,7 +332,8 @@ export default function EditarConsultaPage() {
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-slate-700">
               <div className="flex flex-wrap gap-4">
                 <span><strong>Consulta fija:</strong> $ {VALOR_CONSULTA_FIJO.toLocaleString()} COP</span>
-                <span><strong>Total factura:</strong> $ {totalFactura.toLocaleString()} COP</span>
+                <span><strong>Total medicamentos pagados:</strong> $ {totalMedicamentosPagados.toLocaleString()} COP</span>
+                <span><strong>Total factura pagado:</strong> $ {(VALOR_CONSULTA_FIJO + totalMedicamentosPagados).toLocaleString()} COP</span>
               </div>
             </div>
 
