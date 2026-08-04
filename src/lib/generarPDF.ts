@@ -125,7 +125,7 @@ export function generarPDFConsulta(datos: DatosPDF): void {
     autoTable(doc, {
       startY: y,
       head: [['#', 'Medicamento', 'Posología / Indicaciones']],
-      body: medRows,
+      body: medRows as any,
       margin: { left: margen, right: margen },
       tableWidth: anchoUtil,
       theme: 'plain',
